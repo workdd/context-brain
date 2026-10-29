@@ -223,3 +223,4 @@ body.static #project { display: none; }
 .tip .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
 .tip em { color: var(--text); font-style: normal; }
 .turn .compact-row { margin: 0 12px 10px; }
+.lobe-label small { font-weight: 400; color: var(--dim); margin-left: 4px; font-size: 10px; }

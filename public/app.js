@@ -24,7 +24,7 @@ const LOBE_META = {
   skills:    { color: 0xb6ff5c, dir: [-0.75, 0.5, -0.45] },
   mcp:       { color: 0x3ee6c8, dir: [0.75, 0.5, -0.45] },
   dialog:    { color: 0x7dff9b, dir: [-1, -0.35, 0.15] },
-  shell:     { color: 0xff7a59, dir: [1, -0.35, 0.15] },
+  shell:     { color: 0xf0a24b, dir: [1, -0.35, 0.15] },
   files:     { color: 0xffe066, dir: [0, 0.2, -1] },
   memory:    { color: 0xc48bff, inner: [0, -0.22, 0.12], spread: 0.2 },
   system:    { color: 0x8a9bb0, inner: [0, -0.62, -0.62], spread: 0.17 },
@@ -42,6 +42,7 @@ const LABEL_TOP = 8;      // 늘 이름표를 붙이는 큰 항목 수
 const LABEL_TURN = 12;    // 보고 있는 턴에서 이름표를 붙이는 항목 수
 const FLOW_MAX = 30;      // 보고 있는 턴에서 그리는 빛줄기 수
 const RED_MAX = 12;       // 붉게 표시하는 다시 안 쓰인 항목 수 (큰 것부터)
+const LOBE_SHOW = 20;     // 영역마다 뉴런으로 그리는 큰 항목 수. 나머지는 영역 배지에 개수로만
 let LOBE_NAMES = {};
 const LOBE_EN = { rules: 'Rules (CLAUDE.md)', system: 'System prompt', memory: 'Memory (hooks)', abilities: 'Tool list', dialog: 'Dialog',
   files: 'Files', shell: 'Shell', web: 'Web', agents: 'Subagents', skills: 'Skills', mcp: 'MCP', output: 'Response' };
@@ -326,6 +327,7 @@ const brain = (() => {
 
   // ── 남는 흐름: 보고 있는 턴의 항목 → 응답. 굵기 = 들어온 토큰, 입자가 계속 흐른다
   let flows = [];
+  let flowTurn = 0;
   let flowKey = '';
   function clearFlows() {
     for (const f of flows) {
@@ -340,6 +342,9 @@ const brain = (() => {
     const key = `${no}|${list.map((it) => it.n.id + ':' + it.tokens).join(',')}|${[...evidence].join(',')}`;
     if (key === flowKey) return;
     flowKey = key;
+    // 같은 턴에서 이미 그린 항목은 다시 흐르지 않는다. 새로 들어온 것과 턴을 바꿨을 때만 한 번 흐른다
+    const seen = flowTurn === no ? new Set(flows.map((f) => f.id)) : new Set();
+    flowTurn = no;
     clearFlows();
     for (const it of list) {
       const n = it.n;
@@ -358,7 +363,9 @@ const brain = (() => {
         scene.add(d);
         dots.push(d);
       }
-      flows.push({ c, tube, dots, u: hash(n.id)(), speed: ev ? 0.45 : 0.25 });
+      const done = seen.has(n.id);
+      dots.forEach((d) => (d.visible = !done));
+      flows.push({ id: n.id, c, tube, dots, t: done ? Infinity : -hash(n.id)() * 0.4 });
     }
   }
 
@@ -405,11 +412,23 @@ const brain = (() => {
     const live = [...neurons.values()].filter((n) => !n.compacted);
     const sums = {};
     for (const n of live) sums[n.lobe] = (sums[n.lobe] || 0) + n.tokens;
+    // 그릴 뉴런: 영역마다 큰 것 LOBE_SHOW 개 + 보고 있는 턴의 항목 + 붉은 항목 + 고른 항목.
+    // 압축으로 빠진 것은 보고 있는 턴에 쓰였을 때만 그린다
+    const visible = new Set();
+    const byLobe = {};
+    for (const n of live) (byLobe[n.lobe] = byLobe[n.lobe] || []).push(n);
+    for (const list of Object.values(byLobe)) list.sort((a, b) => b.tokens - a.tokens).slice(0, LOBE_SHOW).forEach((n) => visible.add(n.id));
+    for (const n of neurons.values()) {
+      if (n.turns.has(no) || wasteIds.has(n.id) || (selected && selected.n === n)) visible.add(n.id);
+      n.mesh.visible = visible.has(n.id);
+    }
     for (const l of lobeNames) {
       const s = lobeState[l];
       const present = !!sums[l];
       if (present !== s.present) { s.present = present; surfaceDirty = true; }
-      s.el.innerHTML = `${lobeName(l)}<em>${sums[l] ? kfmt(sums[l]) : '-'}</em>`;
+      const hidden = (byLobe[l] || []).filter((n) => !visible.has(n.id)).length;
+      s.el.innerHTML = `${lobeName(l)}<em>${sums[l] ? kfmt(sums[l]) : '-'}</em>${hidden ? `<small>${L(`+${hidden}개`, `+${hidden}`)}</small>` : ''}`;
+      s.el.title = hidden ? L(`작은 항목 ${hidden}개는 뉴런 없이 합계에만 들어 있습니다. 누르면 목록`, `${hidden} small items are counted in the total without a neuron. Click for the list`) : '';
       s.el.style.opacity = present ? '1' : '0.35';
     }
     const show = new Set(live.filter((n) => n.lobe !== 'output').sort((a, b) => b.tokens - a.tokens).slice(0, LABEL_TOP).map((n) => n.id));
@@ -417,7 +436,7 @@ const brain = (() => {
       .sort((a, b) => b.tokens - a.tokens).slice(0, LABEL_TURN).forEach((n) => show.add(n.id));
     labelOrder = [...show].map((id) => neurons.get(id)).sort((a, b) => (b.turns.has(no) - a.turns.has(no)) || (b.tokens - a.tokens));
     for (const n of neurons.values()) {
-      const on = show.has(n.id);
+      const on = show.has(n.id) && n.mesh.visible;
       n.tag.element.style.display = on ? '' : 'none';
       if (on) {
         n.tag.element.className = 'n-label' + (wasteIds.has(n.id) ? ' waste' : '');
@@ -443,7 +462,7 @@ const brain = (() => {
     const r = renderer.domElement.getBoundingClientRect();
     mouse.set(((ev.clientX - r.left) / r.width) * 2 - 1, -((ev.clientY - r.top) / r.height) * 2 + 1);
     raycaster.setFromCamera(mouse, camera);
-    const hit = raycaster.intersectObjects(group.children)[0];
+    const hit = raycaster.intersectObjects(group.children.filter((o) => o.visible))[0];
     return hit ? hit.object.userData.neuron : null;
   };
   let downAt = null;
@@ -534,9 +553,16 @@ const brain = (() => {
     }
     shellBusy = busy;
 
+    // 빛줄기 입자는 항목 → 응답으로 한 번만 지나가고 사라진다 (계속 참조한다는 뜻이 아니다)
     for (const f of flows) {
-      f.u = (f.u + dt * f.speed) % 1;
-      f.dots.forEach((d, k) => d.position.copy(f.c.getPoint((f.u + k / f.dots.length) % 1)));
+      if (f.t === Infinity) continue;
+      f.t += dt / 1.2;
+      f.dots.forEach((d, k) => {
+        const u = f.t - k * 0.12;
+        d.visible = u >= 0 && u <= 1;
+        if (d.visible) d.position.copy(f.c.getPoint(u));
+      });
+      if (f.t - (f.dots.length - 1) * 0.12 > 1) f.t = Infinity;
     }
     for (let i = pulses.length - 1; i >= 0; i--) {
       const q = pulses[i];
