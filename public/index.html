@@ -24,6 +24,36 @@
 </header>
 
 <main>
+  <section id="brainbox" class="card">
+    <div class="brain-bar">
+      <h2>컨텍스트 뇌</h2>
+      <div class="turn-step">
+        <button id="turn-prev" type="button" aria-label="이전 턴">◀</button>
+        <span id="turn-label">-</span>
+        <button id="turn-next" type="button" aria-label="다음 턴">▶</button>
+      </div>
+      <div class="views">
+        <button type="button" data-cam="side">옆</button>
+        <button type="button" data-cam="top">위</button>
+        <button type="button" data-cam="front">앞</button>
+        <button type="button" id="rotate">회전</button>
+      </div>
+      <button id="brain-size" type="button">크게</button>
+    </div>
+    <div id="stage">
+      <div id="ring" class="overlay"></div>
+      <div id="key" class="overlay">
+        <span><i class="k-size"></i>크기 = 토큰</span>
+        <span><i class="k-now"></i>밝음 = 보고 있는 턴에 쓰임</span>
+        <span><i class="k-old"></i>회색 = 압축으로 빠짐</span>
+        <span><i class="k-waste"></i>붉게 숨쉼 = 낭비 후보</span>
+        <span><i class="k-flow"></i>흰 입자 = 답변에 이름이 나온 근거</span>
+        <span class="k-tip">영역 이름을 누르면 확대 · 뉴런을 누르면 상세</span>
+      </div>
+      <aside id="detail" class="overlay" hidden></aside>
+    </div>
+  </section>
+
   <section id="budget" class="card">
     <div class="budget-head">
       <div class="ctx-now">
@@ -45,19 +75,10 @@
     </div>
   </section>
 
-  <div class="cols">
-    <section id="timeline" class="card">
-      <div class="card-head"><h2>턴 타임라인</h2><span class="hint">입력 → 도구 호출 → 답변. 답변 문장 옆 칩은 그 문장에 이름이 나온 근거입니다</span></div>
-      <ol id="turns"></ol>
-    </section>
-    <aside class="side">
-      <section id="brainbox" class="card">
-        <div class="card-head"><h2 id="brain-title">컨텍스트 뇌</h2><button id="brain-size" type="button">크게</button></div>
-        <div id="stage"></div>
-      </section>
-      <section id="detail" class="card" hidden></section>
-    </aside>
-  </div>
+  <section id="timeline" class="card">
+    <div class="card-head"><h2>턴 타임라인</h2><span class="hint">입력 → 도구 호출 → 답변. 답변 문장 옆 칩은 그 문장에 이름이 나온 근거입니다</span></div>
+    <ol id="turns"></ol>
+  </section>
 </main>
 
 <div id="tip" class="tip" hidden></div>

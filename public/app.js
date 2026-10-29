@@ -34,9 +34,12 @@ const COMPACTABLE = new Set(['dialog', 'files', 'shell', 'web', 'agents', 'mcp',
 // 턴마다 새로 쓰지 않아도 늘 실려 있는 영역
 const STANDING = ['rules', 'system', 'abilities', 'memory'];
 const KIND_LABEL = { use: '사용', result: '결과', load: '로드', ref: '언급' };
-const KIND_WEIGHT = { use: 1.2, result: 0.9, load: 0.7, ref: 1.0 };
+const KIND_WEIGHT = { use: 1.0, result: 0.8, load: 0.6, ref: 0.9 };
 const HISTORY_MAX = 40;
 const ANSWER_LINES = 8;
+const LABEL_TOP = 8;      // 늘 이름표를 붙이는 큰 항목 수
+const LABEL_TURN = 12;    // 보고 있는 턴에서 이름표를 붙이는 항목 수
+const FLOW_MAX = 30;      // 보고 있는 턴에서 그리는 빛줄기 수
 let LOBE_NAMES = {};
 
 const $ = (id) => document.getElementById(id);
@@ -45,6 +48,7 @@ const fmt = (n) => Math.round(n || 0).toLocaleString('ko-KR');
 const kfmt = (n) => (n >= 1000 ? (n / 1000).toFixed(n >= 100000 ? 0 : 1) + 'k' : String(Math.round(n || 0)));
 const clock2 = (t) => (t ? new Date(t).toLocaleTimeString('en-GB') : '');
 const lobeName = (l) => LOBE_NAMES[l] || l;
+const short = (s, n = 26) => (s.length > n ? s.slice(0, n - 1) + '…' : s);
 function escapeHtml(s) {
   return String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 }
@@ -71,21 +75,22 @@ const neurons = new Map();
 let turns = [];            // [{ n, prompt, t, steps, answers, items, added, done, ms, ctxEnd }]
 let compactions = [];      // [{ afterTurn, tokens, t }]
 let ctxHistory = [];
-let ctxModel = '';
 let compactAt = null;
 let viewTurn = null;       // 사용자가 고른 턴 번호. null 이면 지금 턴
-let selected = null;
+let selected = null;       // { n } 또는 { lobe }
+let wasteIds = new Set();
 const openTurns = new Set();
 const closedTurns = new Set();
 const showAll = new Set();
 
 const curTurn = () => turns[turns.length - 1] || null;
+const vt = () => viewTurn || turns.length;
 
 function getNeuron(e) {
   let n = neurons.get(e.id);
   if (n) return n;
   n = { id: e.id, lobe: e.lobe, label: e.label, act: 0, tokens: 0, counts: {}, compacted: false,
-    history: [], turns: new Set(), lastTurn: 0, mesh: null };
+    history: [], turns: new Set(), lastTurn: 0, mesh: null, tag: null };
   neurons.set(e.id, n);
   brain.addNeuron(n);
   return n;
@@ -98,8 +103,7 @@ function startTurn(e) {
 function trackTurn(e, n) {
   const tr = curTurn();
   if (!tr) return;
-  const counted = e.kind !== 'load' || e.lobe === 'skills';
-  if (!counted) return;
+  if (e.kind === 'load' && e.lobe !== 'skills') return;
   n.turns.add(tr.n);
   n.lastTurn = tr.n;
   if (e.lobe === 'output') {
@@ -124,7 +128,6 @@ function applyEvent(e, live) {
   if (e.kind === 'usage') {
     ctxHistory.push(e.tokens);
     if (ctxHistory.length > 120) ctxHistory.shift();
-    ctxModel = e.model || ctxModel;
     const tr = curTurn();
     if (tr) tr.ctxEnd = e.tokens;
     return;
@@ -151,44 +154,52 @@ function applyEvent(e, live) {
   if (n.history.length > HISTORY_MAX) n.history.shift();
   trackTurn(e, n);
   if (live) {
-    n.act = Math.min(1.4, n.act + (KIND_WEIGHT[e.kind] || 0.8));
+    n.act = Math.min(1.2, n.act + (KIND_WEIGHT[e.kind] || 0.8));
     brain.pulse(e, n);
   }
 }
 
+// 턴의 답변 문장에 이름이 그대로 나온 항목들
+function evidenceOf(tr) {
+  if (!tr) return new Set();
+  const cands = [...neurons.values()].filter((n) => n.lobe !== 'output' && n.lobe !== 'dialog' && [...n.turns].some((t) => t <= tr.n));
+  const ids = new Set();
+  for (const s of tr.answers.flatMap(splitSentences)) for (const id of findRefs(s, cands)) ids.add(id);
+  return ids;
+}
+
 // ════════════════════════════════════════════════════════════
-// 3D 뇌 (미니맵)
+// 3D 뇌
 // ════════════════════════════════════════════════════════════
 const brain = (() => {
   const stage = $('stage');
   const size = () => [Math.max(1, stage.clientWidth), Math.max(1, stage.clientHeight)];
   const [w0, h0] = size();
   const scene = new THREE.Scene();
-  const camera = new THREE.PerspectiveCamera(40, w0 / h0, 0.05, 50);
+  const camera = new THREE.PerspectiveCamera(38, w0 / h0, 0.05, 50);
   camera.position.set(3.4, 0.85, 1.5);
   const renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
   renderer.setSize(w0, h0);
-  stage.appendChild(renderer.domElement);
+  stage.prepend(renderer.domElement);
   const labels = new CSS2DRenderer();
   labels.setSize(w0, h0);
-  Object.assign(labels.domElement.style, { position: 'absolute', top: '0', pointerEvents: 'none', display: 'none' });
-  stage.appendChild(labels.domElement);
+  Object.assign(labels.domElement.style, { position: 'absolute', top: '0', left: '0', pointerEvents: 'none', zIndex: 1 });
+  stage.insertBefore(labels.domElement, renderer.domElement.nextSibling);
 
   const controls = new OrbitControls(camera, renderer.domElement);
   controls.enableDamping = true;
-  controls.autoRotate = true;
+  controls.autoRotate = false;
   controls.autoRotateSpeed = 0.35;
-  controls.minDistance = 1.4;
+  controls.minDistance = 1.2;
   controls.maxDistance = 7;
-  controls.enableZoom = false;
 
   const composer = new EffectComposer(renderer);
   composer.addPass(new RenderPass(scene, camera));
-  composer.addPass(new UnrealBloomPass(new THREE.Vector2(w0, h0), 0.55, 0.45, 0.5));
+  composer.addPass(new UnrealBloomPass(new THREE.Vector2(w0, h0), 0.5, 0.45, 0.55));
   composer.addPass(new OutputPass());
 
-  // 표면 점 구름: 대뇌 두 반구 + 소뇌 + 뇌간
+  // ── 표면 점 구름: 대뇌 두 반구 + 소뇌 + 뇌간
   const pts = [];
   const rnd = hash('brain');
   const sphere = () => { const u = rnd() * 2 - 1, th = rnd() * Math.PI * 2, s = Math.sqrt(1 - u * u); return [s * Math.cos(th), u, s * Math.sin(th)]; };
@@ -222,34 +233,41 @@ const brain = (() => {
   const colors = new Float32Array(count * 3);
   geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
   scene.add(new THREE.Points(geo, new THREE.PointsMaterial({
-    size: 0.013, vertexColors: true, transparent: true, opacity: 0.85, depthWrite: false, blending: THREE.AdditiveBlending,
+    size: 0.013, vertexColors: true, transparent: true, opacity: 0.9, depthWrite: false, blending: THREE.AdditiveBlending,
   })));
 
+  // 점마다 가장 가까운 영역과 그 영역에 속한 정도
   const pointLobe = new Int16Array(count).fill(-1);
   const pointWeight = new Float32Array(count);
-  const p = new THREE.Vector3();
-  for (let i = 0; i < count; i++) {
-    p.fromArray(pts, i * 3);
-    let best = -1, bd = Infinity;
-    lobeNames.forEach((l, li) => { const d = p.distanceTo(anchors[l]); if (d < bd) { bd = d; best = li; } });
-    const reach = LOBE_META[lobeNames[best]].inner ? 0.5 : 0.62;
-    if (bd < reach) { pointLobe[i] = best; pointWeight[i] = (1 - bd / reach) ** 1.5; }
+  {
+    const p = new THREE.Vector3();
+    for (let i = 0; i < count; i++) {
+      p.fromArray(pts, i * 3);
+      let best = -1, bd = Infinity;
+      lobeNames.forEach((l, li) => { const d = p.distanceTo(anchors[l]); if (d < bd) { bd = d; best = li; } });
+      const reach = LOBE_META[lobeNames[best]].inner ? 0.5 : 0.62;
+      if (bd < reach) { pointLobe[i] = best; pointWeight[i] = (1 - bd / reach) ** 1.3; }
+    }
   }
 
+  // ── 영역 이름표: 이름 + 토큰 합계. 누르면 그 영역으로 다가간다
   const lobeState = {};
   for (const l of lobeNames) {
     const el = document.createElement('div');
     el.className = 'lobe-label';
+    el.style.color = hex(LOBE_META[l].color);
+    el.addEventListener('click', () => focusLobe(l));
     const obj = new CSS2DObject(el);
-    obj.position.copy(LOBE_META[l].inner ? anchors[l] : anchors[l].clone().multiplyScalar(1.17));
+    obj.position.copy(LOBE_META[l].inner ? anchors[l] : anchors[l].clone().multiplyScalar(1.2));
     scene.add(obj);
-    lobeState[l] = { act: 0, hold: 0, el, color: new THREE.Color(LOBE_META[l].color) };
+    lobeState[l] = { act: 0, hold: 0, present: false, el, color: new THREE.Color(LOBE_META[l].color) };
   }
 
-  const neuronGeo = new THREE.SphereGeometry(1, 16, 12);
+  // ── 뉴런
+  const neuronGeo = new THREE.SphereGeometry(1, 18, 14);
   const group = new THREE.Group();
   scene.add(group);
-  const radiusFor = (tokens) => Math.min(0.065, 0.013 + 0.011 * Math.log10(1 + tokens / 40));
+  const radiusFor = (tokens) => Math.min(0.07, 0.012 + 0.012 * Math.log10(1 + tokens / 40));
 
   function position(lobe, id) {
     const m = LOBE_META[lobe];
@@ -268,20 +286,26 @@ const brain = (() => {
     mesh.userData.neuron = n;
     group.add(mesh);
     n.mesh = mesh;
+    const el = document.createElement('div');
+    el.className = 'n-label';
+    el.style.display = 'none';
+    const tag = new CSS2DObject(el);
+    tag.position.copy(mesh.position);
+    scene.add(tag);
+    n.tag = tag;
   }
 
-  // 신호선
+  // ── 순간 신호 (실시간 이벤트가 들어올 때 한 번)
   const pulses = [];
-  const dotGeo = new THREE.SphereGeometry(0.012, 8, 6);
+  const dotGeo = new THREE.SphereGeometry(1, 8, 6);
   const curve = (a, b) => new THREE.QuadraticBezierCurve3(a.clone(), a.clone().add(b).multiplyScalar(0.225), b.clone());
   function spawn(from, to, color) {
-    if (pulses.length > 70) return;
+    if (pulses.length > 40) return;
     const c = curve(from, to);
-    const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(c.getPoints(32)),
-      new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.35, blending: THREE.AdditiveBlending, depthWrite: false }));
-    const dot = new THREE.Mesh(dotGeo, new THREE.MeshBasicMaterial({ color: new THREE.Color(color).multiplyScalar(1.3), toneMapped: false }));
-    scene.add(line, dot);
-    pulses.push({ c, line, dot, age: 0, life: 1.1 });
+    const dot = new THREE.Mesh(dotGeo, new THREE.MeshBasicMaterial({ color: new THREE.Color(color).multiplyScalar(1.6), toneMapped: false }));
+    dot.scale.setScalar(0.016);
+    scene.add(dot);
+    pulses.push({ c, dot, age: 0, life: 0.9 });
   }
   function pulse(e, n) {
     if (e.lobe === 'output') return;
@@ -289,30 +313,119 @@ const brain = (() => {
     else if (e.kind === 'result' || e.kind === 'ref') spawn(n.mesh.position, anchors.output, 0xffffff);
   }
 
-  // 보고 있는 턴의 경로는 켜 둔다
-  let paths = [];
-  function showTurn(no) {
-    for (const l of paths) { scene.remove(l); l.geometry.dispose(); l.material.dispose(); }
-    paths = [];
-    if (!no) return;
-    for (const n of neurons.values()) {
-      if (!n.turns.has(no) || n.lobe === 'output') continue;
-      const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(curve(anchors.output, n.mesh.position).getPoints(32)),
-        new THREE.LineBasicMaterial({ color: LOBE_META[n.lobe].color, transparent: true, opacity: 0.28, blending: THREE.AdditiveBlending, depthWrite: false }));
-      scene.add(line);
-      paths.push(line);
+  // ── 남는 흐름: 보고 있는 턴의 항목 → 응답. 굵기 = 들어온 토큰, 입자가 계속 흐른다
+  let flows = [];
+  let flowKey = '';
+  function clearFlows() {
+    for (const f of flows) {
+      scene.remove(f.tube); f.tube.geometry.dispose(); f.tube.material.dispose();
+      for (const d of f.dots) { scene.remove(d); d.material.dispose(); }
+    }
+    flows = [];
+  }
+  function buildFlows(no, evidence) {
+    const tr = turns[no - 1];
+    const list = tr ? [...tr.items.values()].sort((a, b) => b.tokens - a.tokens).slice(0, FLOW_MAX) : [];
+    const key = `${no}|${list.map((it) => it.n.id + ':' + it.tokens).join(',')}|${[...evidence].join(',')}`;
+    if (key === flowKey) return;
+    flowKey = key;
+    clearFlows();
+    for (const it of list) {
+      const n = it.n;
+      const ev = evidence.has(n.id);
+      const c = curve(n.mesh.position, anchors.output);
+      const r = Math.min(0.016, 0.0035 + 0.0035 * Math.log10(1 + it.tokens / 60));
+      const color = new THREE.Color(LOBE_META[n.lobe].color);
+      const tube = new THREE.Mesh(new THREE.TubeGeometry(c, 40, r, 6, false),
+        new THREE.MeshBasicMaterial({ color, transparent: true, opacity: ev ? 0.5 : 0.2, blending: THREE.AdditiveBlending, depthWrite: false }));
+      scene.add(tube);
+      const dots = [];
+      for (let k = 0; k < (ev ? 3 : 2); k++) {
+        const d = new THREE.Mesh(dotGeo, new THREE.MeshBasicMaterial({
+          color: ev ? new THREE.Color(0xffffff).multiplyScalar(1.4) : color.clone().multiplyScalar(1.1), toneMapped: false }));
+        d.scale.setScalar(ev ? 0.012 : 0.008);
+        scene.add(d);
+        dots.push(d);
+      }
+      flows.push({ c, tube, dots, u: hash(n.id)(), speed: ev ? 0.45 : 0.25 });
     }
   }
 
+  // ── 카메라: 시점 버튼과 영역 확대
+  let fly = null;
+  function flyTo(pos, target) {
+    fly = { p0: camera.position.clone(), t0: controls.target.clone(), p1: pos, t1: target, k: 0 };
+  }
+  const VIEWS = {
+    side: [new THREE.Vector3(3.4, 0.6, 1.2), new THREE.Vector3(0, 0, 0)],
+    top: [new THREE.Vector3(0.01, 4.0, 0.6), new THREE.Vector3(0, 0, 0)],
+    front: [new THREE.Vector3(0.4, 0.5, 3.8), new THREE.Vector3(0, 0, 0)],
+  };
+  function setView(name) {
+    const [p, t] = VIEWS[name];
+    flyTo(p.clone(), t.clone());
+  }
+  function focusLobe(l) {
+    const a = anchors[l];
+    const dir = LOBE_META[l].inner ? new THREE.Vector3(1, 0.25, 0.3).normalize() : a.clone().normalize();
+    flyTo(a.clone().add(dir.multiplyScalar(1.7)), a.clone().multiplyScalar(0.75));
+    for (const n of neurons.values()) if (n.lobe === l) n.act = Math.max(n.act, 0.5);
+    selectLobe(l);
+  }
+
+  // ── 화면 갱신 때 한 번: 이름표, 영역 합계, 흐름
+  let surfaceDirty = true;
+  let labelOrder = [];
+  // 화면에서 겹치는 이름표는 우선순위(보고 있는 턴 → 토큰)가 낮은 쪽을 숨긴다
+  function declutter() {
+    const placed = lobeNames.map((l) => lobeState[l].el.getBoundingClientRect());
+    const hit = (r) => placed.some((q) => r.left < q.right + 2 && r.right > q.left - 2 && r.top < q.bottom + 1 && r.bottom > q.top - 1);
+    for (const n of labelOrder) {
+      const el = n.tag.element;
+      if (el.style.display === 'none') continue;
+      el.style.visibility = 'visible';
+      const r = el.getBoundingClientRect();
+      if (!r.width || hit(r)) el.style.visibility = 'hidden';
+      else placed.push(r);
+    }
+  }
+  function refresh() {
+    const no = vt();
+    const live = [...neurons.values()].filter((n) => !n.compacted);
+    const sums = {};
+    for (const n of live) sums[n.lobe] = (sums[n.lobe] || 0) + n.tokens;
+    for (const l of lobeNames) {
+      const s = lobeState[l];
+      const present = !!sums[l];
+      if (present !== s.present) { s.present = present; surfaceDirty = true; }
+      s.el.innerHTML = `${lobeName(l)}<em>${sums[l] ? kfmt(sums[l]) : '-'}</em>`;
+      s.el.style.opacity = present ? '1' : '0.35';
+    }
+    const show = new Set(live.filter((n) => n.lobe !== 'output').sort((a, b) => b.tokens - a.tokens).slice(0, LABEL_TOP).map((n) => n.id));
+    live.filter((n) => n.turns.has(no) && n.lobe !== 'output' && n.lobe !== 'dialog')
+      .sort((a, b) => b.tokens - a.tokens).slice(0, LABEL_TURN).forEach((n) => show.add(n.id));
+    labelOrder = [...show].map((id) => neurons.get(id)).sort((a, b) => (b.turns.has(no) - a.turns.has(no)) || (b.tokens - a.tokens));
+    for (const n of neurons.values()) {
+      const on = show.has(n.id);
+      n.tag.element.style.display = on ? '' : 'none';
+      if (on) {
+        n.tag.element.className = 'n-label' + (wasteIds.has(n.id) ? ' waste' : '');
+        n.tag.element.innerHTML = `${escapeHtml(short(n.label))}<em>${kfmt(n.tokens)}</em>`;
+      }
+    }
+    buildFlows(no, evidenceOf(turns[no - 1]));
+  }
+
   function clear() {
-    for (const n of neurons.values()) { group.remove(n.mesh); n.mesh.material.dispose(); }
-    showTurn(null);
+    for (const n of neurons.values()) { group.remove(n.mesh); n.mesh.material.dispose(); scene.remove(n.tag); }
+    clearFlows();
+    flowKey = '';
   }
 
   let flashV = 0;
   const flash = () => { flashV = 1; };
 
-  // 클릭 · 툴팁
+  // ── 클릭 · 툴팁
   const raycaster = new THREE.Raycaster();
   const mouse = new THREE.Vector2();
   const pick = (ev) => {
@@ -323,7 +436,7 @@ const brain = (() => {
     return hit ? hit.object.userData.neuron : null;
   };
   let downAt = null;
-  renderer.domElement.addEventListener('pointerdown', (ev) => { downAt = [ev.clientX, ev.clientY]; controls.autoRotate = false; });
+  renderer.domElement.addEventListener('pointerdown', (ev) => { downAt = [ev.clientX, ev.clientY]; fly = null; });
   renderer.domElement.addEventListener('pointerup', (ev) => {
     if (!downAt || Math.hypot(ev.clientX - downAt[0], ev.clientY - downAt[1]) > 5) return;
     const n = pick(ev);
@@ -331,7 +444,8 @@ const brain = (() => {
   });
   renderer.domElement.addEventListener('pointermove', (ev) => {
     const n = pick(ev);
-    if (n) showTip(ev, `<b>${lobeName(n.lobe)}: ${escapeHtml(n.label)}</b><span>약 ${fmt(n.tokens)} 토큰${n.compacted ? ' · 압축으로 빠짐' : ''} · 클릭하면 자세히</span>`);
+    renderer.domElement.style.cursor = n ? 'pointer' : '';
+    if (n) showTip(ev, `<b>${lobeName(n.lobe)}: ${escapeHtml(n.label)}</b><span>약 ${fmt(n.tokens)} 토큰${n.compacted ? ' · 압축으로 빠짐' : ''}${wasteIds.has(n.id) ? ' · 낭비 후보' : ''}</span><span>클릭하면 자세히</span>`);
     else hideTip();
   });
   renderer.domElement.addEventListener('pointerleave', hideTip);
@@ -345,76 +459,113 @@ const brain = (() => {
     labels.setSize(w, h);
   }
   new ResizeObserver(resize).observe(stage);
-  const setLabels = (on) => { labels.domElement.style.display = on ? '' : 'none'; };
 
+  // ── 매 프레임
   const clk = new THREE.Clock();
   const tmp = new THREE.Color();
-  const BASE = new THREE.Color(0x3a4a6a).multiplyScalar(0.55);
+  const BASE = new THREE.Color(0x34425e).multiplyScalar(0.5);
   const GREY = new THREE.Color(0x55607a);
+  const RED = new THREE.Color(0xff4a4a);
   const FLASH = new THREE.Color(0xff5050);
-  let dirty = true;
+  const baseColors = new Float32Array(count * 3);
+  function paintBase() {
+    // 영역이 있는 자리는 표면에 그 영역 색을 옅게 늘 칠해 둔다
+    for (let i = 0; i < count; i++) {
+      tmp.copy(BASE);
+      const li = pointLobe[i];
+      if (li >= 0 && lobeState[lobeNames[li]].present) tmp.lerp(lobeState[lobeNames[li]].color, 0.28 * pointWeight[i]).multiplyScalar(1 + 0.5 * pointWeight[i]);
+      baseColors[i * 3] = tmp.r; baseColors[i * 3 + 1] = tmp.g; baseColors[i * 3 + 2] = tmp.b;
+    }
+  }
+  let shellBusy = true;
+  let declutterAt = 0;
   function frame() {
     const dt = Math.min(clk.getDelta(), 0.1);
-    const decay = Math.exp(-dt / 3.5);
+    const time = clk.elapsedTime;
+    const decay = Math.exp(-dt / 2.5);
     flashV *= Math.exp(-dt / 0.6);
-    const vt = viewTurn || turns.length;
+    const no = vt();
     for (const l of lobeNames) { lobeState[l].act = 0; lobeState[l].hold = 0; }
     for (const n of neurons.values()) {
       n.act *= decay;
-      const hold = !n.compacted && n.turns.has(vt) ? 0.45 : 0;
       const ls = lobeState[n.lobe];
+      // 밝기 = 최근에 쓰였는지: 보고 있는 턴 > 그 전 두 턴 > 늘 실린 것 > 오래된 것
+      const inView = n.turns.has(no);
+      const recent = !inView && (n.turns.has(no - 1) || n.turns.has(no - 2));
+      const level = inView ? 0.6 : recent ? 0.22 : STANDING.includes(n.lobe) ? 0.18 : 0.06;
       ls.act = Math.max(ls.act, n.act);
-      ls.hold = Math.max(ls.hold, hold);
-      n.mesh.scale.setScalar(radiusFor(n.tokens) * (1 + 0.35 * Math.min(n.act + hold, 1.5)));
-      if (n.compacted) { n.mesh.material.color.copy(GREY).multiplyScalar(0.35 + n.act); n.mesh.material.opacity = 0.45; }
-      else { n.mesh.material.color.copy(ls.color).multiplyScalar(0.25 + 0.8 * (n.act + hold)); n.mesh.material.opacity = 1; }
+      if (inView) ls.hold = 0.5;
+      n.mesh.scale.setScalar(radiusFor(n.tokens) * (1 + 0.3 * Math.min(n.act, 1)));
+      const m = n.mesh.material;
+      if (n.compacted) { m.color.copy(GREY).multiplyScalar(0.3 + n.act); m.opacity = 0.4; }
+      else if (wasteIds.has(n.id)) { m.color.copy(RED).multiplyScalar(0.45 + 0.35 * Math.sin(time * 3) + n.act); m.opacity = 1; }
+      else { m.color.copy(ls.color).multiplyScalar(0.12 + 0.95 * (level + n.act)); m.opacity = 1; }
     }
+
+    if (surfaceDirty) { paintBase(); surfaceDirty = false; shellBusy = true; }
     const busy = flashV > 0.01 || lobeNames.some((l) => lobeState[l].act > 0.01 || lobeState[l].hold > 0.01);
-    if (busy || dirty) {
+    if (busy || shellBusy) {
       for (let i = 0; i < count; i++) {
-        tmp.copy(BASE);
+        tmp.setRGB(baseColors[i * 3], baseColors[i * 3 + 1], baseColors[i * 3 + 2]);
         const li = pointLobe[i];
         if (li >= 0) {
           const ls = lobeState[lobeNames[li]];
-          const a = Math.max(ls.act, ls.hold * 0.6);
-          if (a > 0.01) tmp.lerp(ls.color, Math.min(1, a * pointWeight[i] * 0.6)).multiplyScalar(1 + a * pointWeight[i] * 0.6);
+          const a = Math.max(ls.act, ls.hold * 0.5);
+          if (a > 0.01) tmp.lerp(ls.color, Math.min(1, a * pointWeight[i] * 0.6)).multiplyScalar(1 + a * pointWeight[i] * 0.5);
         }
         if (flashV > 0.01) tmp.lerp(FLASH, flashV * 0.5);
         colors[i * 3] = tmp.r; colors[i * 3 + 1] = tmp.g; colors[i * 3 + 2] = tmp.b;
       }
       geo.attributes.color.needsUpdate = true;
     }
-    dirty = busy;
-    for (const l of lobeNames) {
-      const s = lobeState[l];
-      s.el.textContent = lobeName(l);
-      s.el.style.opacity = String(0.45 + Math.min(0.55, s.act + s.hold));
+    shellBusy = busy;
+
+    for (const f of flows) {
+      f.u = (f.u + dt * f.speed) % 1;
+      f.dots.forEach((d, k) => d.position.copy(f.c.getPoint((f.u + k / f.dots.length) % 1)));
     }
     for (let i = pulses.length - 1; i >= 0; i--) {
       const q = pulses[i];
       q.age += dt;
       const k = q.age / q.life;
       q.dot.position.copy(q.c.getPoint(Math.min(1, k)));
-      q.line.material.opacity = 0.35 * (1 - k);
-      if (k >= 1) { scene.remove(q.line, q.dot); q.line.geometry.dispose(); q.line.material.dispose(); q.dot.material.dispose(); pulses.splice(i, 1); }
+      if (k >= 1) { scene.remove(q.dot); q.dot.material.dispose(); pulses.splice(i, 1); }
+    }
+    if (fly) {
+      fly.k = Math.min(1, fly.k + dt / 0.8);
+      const e = 1 - (1 - fly.k) ** 3;
+      camera.position.lerpVectors(fly.p0, fly.p1, e);
+      controls.target.lerpVectors(fly.t0, fly.t1, e);
+      if (fly.k >= 1) fly = null;
     }
     controls.update();
     composer.render();
     labels.render(scene, camera);
+    if ((declutterAt -= dt) <= 0) { declutterAt = 0.3; declutter(); }
     requestAnimationFrame(frame);
   }
   frame();
 
-  return { addNeuron, pulse, flash, showTurn, clear, setLabels, resize };
+  const toggleRotate = () => (controls.autoRotate = !controls.autoRotate);
+  return { addNeuron, pulse, flash, refresh, clear, setView, focusLobe, toggleRotate };
 })();
 
+// ── 뇌 막대: 턴 이동 · 시점 · 회전 · 크게
+document.querySelectorAll('[data-cam]').forEach((b) => b.addEventListener('click', () => brain.setView(b.dataset.cam)));
+$('rotate').addEventListener('click', () => $('rotate').classList.toggle('on', brain.toggleRotate()));
+$('turn-prev').addEventListener('click', () => setViewTurn(Math.max(1, vt() - 1)));
+$('turn-next').addEventListener('click', () => setViewTurn(vt() + 1));
 $('brain-size').addEventListener('click', () => {
   const big = $('brainbox').classList.toggle('big');
   document.body.classList.toggle('brain-big', big);
   $('brain-size').textContent = big ? '작게 (Esc)' : '크게';
-  brain.setLabels(big);
 });
-addEventListener('keydown', (ev) => { if (ev.key === 'Escape' && $('brainbox').classList.contains('big')) $('brain-size').click(); });
+addEventListener('keydown', (ev) => {
+  if (ev.key === 'Escape' && $('brainbox').classList.contains('big')) $('brain-size').click();
+  if (ev.target.closest('input, select, textarea')) return;
+  if (ev.key === '[') $('turn-prev').click();
+  if (ev.key === ']') $('turn-next').click();
+});
 
 // ════════════════════════════════════════════════════════════
 // 툴팁 · 선택
@@ -429,16 +580,17 @@ function showTip(ev, html) {
 function hideTip() { tip.hidden = true; }
 
 function select(n) {
-  selected = n;
+  selected = { n };
   n.act = Math.max(n.act, 1);
   renderDetail();
-  $('detail').scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+}
+function selectLobe(l) {
+  selected = { lobe: l };
+  renderDetail();
 }
 
 function setViewTurn(no) {
-  viewTurn = no && no !== turns.length ? no : null;
-  brain.showTurn(viewTurn || turns.length);
-  $('brain-title').textContent = viewTurn ? `컨텍스트 뇌 · 턴 #${viewTurn}` : '컨텍스트 뇌';
+  viewTurn = no && no < turns.length ? no : null;
   scheduleRender();
 }
 
@@ -449,7 +601,7 @@ document.addEventListener('click', (ev) => {
   const more = ev.target.closest('[data-more]');
   if (more) { const no = Number(more.dataset.more); showAll.has(no) ? showAll.delete(no) : showAll.add(no); scheduleRender(); return; }
   const view = ev.target.closest('[data-view]');
-  if (view) { setViewTurn(Number(view.dataset.view)); return; }
+  if (view) { setViewTurn(Number(view.dataset.view)); $('brainbox').scrollIntoView({ behavior: 'smooth' }); return; }
   const head = ev.target.closest('[data-turn]');
   if (head) {
     const no = Number(head.dataset.turn);
@@ -459,16 +611,31 @@ document.addEventListener('click', (ev) => {
 });
 document.addEventListener('mouseover', (ev) => {
   const t = ev.target.closest('[data-id]');
-  if (!t || !neurons.has(t.dataset.id) || t.closest('#stage')) return;
+  if (!t || !neurons.has(t.dataset.id)) return;
   const n = neurons.get(t.dataset.id);
-  n.act = Math.max(n.act, 0.8); // 화면 목록에 올린 항목을 뇌에서도 짚어 준다
+  n.act = Math.max(n.act, 0.8); // 목록에서 가리킨 항목을 뇌에서도 짚어 준다
 });
 
 // ════════════════════════════════════════════════════════════
-// 화면: 예산 · 면적 지도 · 낭비 후보
+// 화면: 예산 링 · 예산 · 면적 지도 · 낭비 후보
 // ════════════════════════════════════════════════════════════
+function renderRing(now) {
+  const box = $('ring');
+  if (now == null) { box.innerHTML = '<span>컨텍스트 기록 없음</span>'; return; }
+  const r = compactAt ? Math.min(1, now / compactAt) : 0;
+  const color = r > 0.85 ? '#ff8a8a' : r > 0.65 ? '#ffc76b' : '#9be7a8';
+  const C = 2 * Math.PI * 17;
+  box.innerHTML = `<svg width="44" height="44" viewBox="0 0 44 44" aria-hidden="true">
+      <circle cx="22" cy="22" r="17" fill="none" stroke="rgba(255,255,255,0.1)" stroke-width="5"/>
+      ${compactAt ? `<circle cx="22" cy="22" r="17" fill="none" stroke="${color}" stroke-width="5" stroke-linecap="round"
+        stroke-dasharray="${(C * r).toFixed(1)} ${C.toFixed(1)}" transform="rotate(-90 22 22)"/>` : ''}
+      <text x="22" y="26" text-anchor="middle" font-size="11" fill="#e3e9f5">${compactAt ? Math.round(r * 100) + '%' : '?'}</text></svg>
+    <div><b>${kfmt(now)} 토큰</b>${compactAt ? `압축까지 약 ${kfmt(Math.max(0, compactAt - now))}` : '압축 기준 미관측'}</div>`;
+}
+
 function renderBudget() {
   const now = ctxHistory[ctxHistory.length - 1];
+  renderRing(now);
   $('ctx').textContent = now != null ? `${fmt(now)} 토큰` : '-';
   const fill = $('gauge-fill');
   const note = $('gauge-note');
@@ -483,10 +650,10 @@ function renderBudget() {
   }
   drawSpark();
 
-  // 면적 지도: 지금 컨텍스트에 남아 있는 항목. 크기는 추정치라 실측과 차이는 회색 타일로 둔다
+  // 면적 지도: 지금 컨텍스트에 남아 있는 항목. 크기는 추정치라 실측과의 차이는 위에 한 줄로 밝힌다
   const live = [...neurons.values()].filter((n) => !n.compacted && n.tokens > 0);
   const waste = wasteCandidates(live, turns.length);
-  const wasteIds = new Set(waste.map((n) => n.id));
+  wasteIds = new Set(waste.map((n) => n.id));
   const groups = lobeNames.map((l) => ({ lobe: l, items: live.filter((n) => n.lobe === l) }))
     .map((g) => ({ ...g, value: g.items.reduce((s, n) => s + n.tokens, 0) })).filter((g) => g.value > 0);
   const est = groups.reduce((s, g) => s + g.value, 0);
@@ -509,7 +676,7 @@ function renderBudget() {
     for (const c of squarify(parts, g.x, g.y, g.w, g.h)) {
       const it = c.item;
       if (it.n) {
-        const cls = [wasteIds.has(it.n.id) ? 'waste' : '', STANDING.includes(G.lobe) || it.n.turns.has(viewTurn || turns.length) ? '' : 'old'].join(' ');
+        const cls = [wasteIds.has(it.n.id) ? 'waste' : '', STANDING.includes(G.lobe) || it.n.turns.has(vt()) ? '' : 'old'].join(' ');
         html += tileHtml(c, cls, it.n.id, `${lobeName(G.lobe)}: ${it.n.label}`, kfmt(it.n.tokens), color);
       } else {
         html += tileHtml(c, 'old', null, `${lobeName(G.lobe)}: 그 밖 ${it.rest}개`, kfmt(it.value), color);
@@ -521,7 +688,7 @@ function renderBudget() {
   const wbox = $('waste');
   const wsum = waste.reduce((s, n) => s + n.tokens, 0);
   wbox.innerHTML = `<h3>낭비 후보 ${waste.length ? `· 약 ${kfmt(wsum)} 토큰` : ''}</h3>
-    <div class="why">800토큰 이상 들어왔는데 마지막으로 쓰인 뒤 2턴 넘게 다시 쓰이지 않은 항목. 지도에서 붉은 점선</div>
+    <div class="why">800토큰 이상 들어왔는데 마지막으로 쓰인 뒤 2턴 넘게 다시 쓰이지 않은 항목. 뇌에서 붉게 숨쉬는 뉴런</div>
     ${waste.length ? `<ol>${waste.map((n) => `<li data-id="${escapeHtml(n.id)}"><i class="dot" style="background:${hex(LOBE_META[n.lobe].color)}"></i>
       <span>${lobeName(n.lobe)}: ${escapeHtml(n.label)}</span><em>${kfmt(n.tokens)} · #${n.lastTurn} 이후</em></li>`).join('')}</ol>`
       : '<div class="none">없음</div>'}`;
@@ -590,7 +757,7 @@ function turnHtml(tr) {
   const sum = lobeNames.filter((l) => byLobe[l]).map((l) => `<span><i class="dot" style="background:${hex(LOBE_META[l].color)}"></i> ${lobeName(l)} ${byLobe[l]}</span>`).join('');
   const state = tr.done ? `<span class="state done">완료 ${(tr.ms / 1000).toFixed(1)}초</span>`
     : tr.n === turns.length ? '<span class="state live">진행 중</span>' : '<span class="state">기록 없음</span>';
-  const viewing = (viewTurn || turns.length) === tr.n;
+  const viewing = vt() === tr.n;
   let body = '';
   if (isOpen(tr.n)) {
     const flow = tr.steps.map((s) => {
@@ -599,8 +766,7 @@ function turnHtml(tr) {
     }).join('<span class="arrow">→</span>');
     // 답변 문장마다 이름이 그대로 나온 근거를 붙인다. 이 턴과 그 전에 다룬 항목이 후보
     const cands = [...neurons.values()].filter((n) => n.lobe !== 'output' && n.lobe !== 'dialog' && [...n.turns].some((t) => t <= tr.n));
-    const sentences = tr.answers.flatMap(splitSentences);
-    const rows = sentences.map((s) => ({ s, refs: findRefs(s, cands) }));
+    const rows = tr.answers.flatMap(splitSentences).map((s) => ({ s, refs: findRefs(s, cands) }));
     const all = showAll.has(tr.n);
     const shown = all ? rows : rows.slice(0, ANSWER_LINES);
     const hits = rows.filter((r) => r.refs.length).length;
@@ -618,7 +784,7 @@ function turnHtml(tr) {
         <div class="flow">${flow || '<span class="empty">도구를 쓰지 않았습니다</span>'}</div></div>
       <div class="sec"><div class="sec-label">답변과 근거 ${rows.length ? `· ${rows.length}문장 중 ${hits}문장에 근거 이름이 나옴` : ''}</div>${answer}</div>
       <div class="sec"><div class="sec-label">늘 실려 있던 것</div><div class="flow">${standing}</div></div>
-      <div class="sec">${viewing && viewTurn ? '<button class="btn" data-view="0">지금 턴으로 돌아가기</button>' : !viewing ? `<button class="btn" data-view="${tr.n}">이 턴을 뇌에서 보기</button>` : ''}</div>
+      <div class="sec">${viewing ? '<span class="empty">위 뇌가 이 턴을 보여 주고 있습니다</span>' : `<button class="btn" data-view="${tr.n}">이 턴을 뇌에서 보기</button>`}</div>
     </div>`;
   }
   return `<li class="turn ${viewing ? 'viewing' : ''}">
@@ -640,24 +806,43 @@ function renderTimeline() {
   $('turns').innerHTML = html;
 }
 
+function renderTurnLabel() {
+  const no = vt();
+  $('turn-label').textContent = turns.length ? (viewTurn ? `턴 #${no} / ${turns.length}` : `지금 턴 #${no}`) : '턴 없음';
+  $('turn-prev').disabled = no <= 1;
+  $('turn-next').disabled = !viewTurn;
+}
+
 // ════════════════════════════════════════════════════════════
-// 화면: 상세
+// 화면: 상세 (뇌 위 오른쪽)
 // ════════════════════════════════════════════════════════════
 function renderDetail() {
   const box = $('detail');
   if (!selected) { box.hidden = true; return; }
-  const n = selected;
-  const counts = Object.entries(n.counts).map(([k, v]) => `${KIND_LABEL[k] || k} ${v}회`).join(' · ');
-  const rows = n.history.slice().reverse().map((e) => `<li><div class="d-head"><span class="kind">${KIND_LABEL[e.kind] || e.kind}</span>${clock2(e.t)}
-      ${e.tokens ? ` · 약 ${fmt(e.tokens)} 토큰` : ''}${e.error ? ' · <b class="err">오류</b>' : ''}${e.tool ? ' · ' + e.tool : ''}</div>
-      ${e.input ? `<pre>${escapeHtml(e.input)}</pre>` : e.detail ? `<div class="d-note">${escapeHtml(e.detail)}</div>` : ''}
-      ${e.preview ? `<pre class="out">${escapeHtml(e.preview)}</pre>` : ''}</li>`).join('');
-  const usedIn = [...n.turns].sort((a, b) => a - b).map((t) => '#' + t).join(' ');
-  box.innerHTML = `<button class="close" aria-label="닫기">×</button>
-    <div class="d-lobe" style="color:${hex(LOBE_META[n.lobe].color)}">${lobeName(n.lobe)}</div>
-    <h3>${escapeHtml(n.label)}</h3>
-    <div class="d-stats">${counts} · 약 ${fmt(n.tokens)} 토큰${n.compacted ? ' · 압축으로 컨텍스트에서 빠짐' : ''}${usedIn ? ` · 쓰인 턴 ${usedIn}` : ''}</div>
-    <ol class="d-list">${rows}</ol>`;
+  if (selected.lobe) {
+    const l = selected.lobe;
+    const list = [...neurons.values()].filter((n) => n.lobe === l).sort((a, b) => (a.compacted - b.compacted) || (b.tokens - a.tokens));
+    const total = list.filter((n) => !n.compacted).reduce((s, n) => s + n.tokens, 0);
+    box.innerHTML = `<button class="close" aria-label="닫기">×</button>
+      <div class="d-lobe" style="color:${hex(LOBE_META[l].color)}">영역</div>
+      <h3>${lobeName(l)}</h3>
+      <div class="d-stats">${list.length}개 · 컨텍스트에 남은 양 약 ${fmt(total)} 토큰</div>
+      <ol class="l-items">${list.map((n) => `<li data-id="${escapeHtml(n.id)}" class="${n.compacted ? 'off' : ''} ${wasteIds.has(n.id) ? 'waste' : ''}">
+        <span>${escapeHtml(n.label)}</span><em>${n.compacted ? '압축됨' : kfmt(n.tokens)}${n.lastTurn ? ` · #${n.lastTurn}` : ''}</em></li>`).join('') || '<li>항목 없음</li>'}</ol>`;
+  } else {
+    const n = selected.n;
+    const counts = Object.entries(n.counts).map(([k, v]) => `${KIND_LABEL[k] || k} ${v}회`).join(' · ');
+    const rows = n.history.slice().reverse().map((e) => `<li><div class="d-head"><span class="kind">${KIND_LABEL[e.kind] || e.kind}</span>${clock2(e.t)}
+        ${e.tokens ? ` · 약 ${fmt(e.tokens)} 토큰` : ''}${e.error ? ' · <b class="err">오류</b>' : ''}${e.tool ? ' · ' + e.tool : ''}</div>
+        ${e.input ? `<pre>${escapeHtml(e.input)}</pre>` : e.detail ? `<div class="d-note">${escapeHtml(e.detail)}</div>` : ''}
+        ${e.preview ? `<pre class="out">${escapeHtml(e.preview)}</pre>` : ''}</li>`).join('');
+    const usedIn = [...n.turns].sort((a, b) => a - b).map((t) => '#' + t).join(' ');
+    box.innerHTML = `<button class="close" aria-label="닫기">×</button>
+      <div class="d-lobe" style="color:${hex(LOBE_META[n.lobe].color)}">${lobeName(n.lobe)}</div>
+      <h3>${escapeHtml(n.label)}</h3>
+      <div class="d-stats">${counts} · 약 ${fmt(n.tokens)} 토큰${n.compacted ? ' · 압축으로 컨텍스트에서 빠짐' : ''}${wasteIds.has(n.id) ? ' · 낭비 후보' : ''}${usedIn ? ` · 쓰인 턴 ${usedIn}` : ''}</div>
+      <ol class="d-list">${rows}</ol>`;
+  }
   box.querySelector('.close').addEventListener('click', () => { selected = null; renderDetail(); });
   box.hidden = false;
 }
@@ -668,8 +853,10 @@ function scheduleRender() {
   if (renderTimer) return;
   renderTimer = setTimeout(() => {
     renderTimer = null;
-    renderBudget();
+    renderBudget();        // 낭비 후보를 먼저 계산해야 뇌가 붉게 칠할 수 있다
+    brain.refresh();
     renderTimeline();
+    renderTurnLabel();
     if (selected) renderDetail();
   }, 250);
 }
@@ -689,6 +876,7 @@ function reset() {
   ctxHistory = [];
   selected = null;
   viewTurn = null;
+  wasteIds = new Set();
   openTurns.clear(); closedTurns.clear(); showAll.clear();
   renderDetail();
 }
@@ -704,14 +892,11 @@ function connect(file) {
     currentFile = data.file;
     $('session').value = currentFile;
     for (const e of data.events) applyEvent(e, false);
-    brain.showTurn(turns.length);
     scheduleRender();
     $('status').textContent = `기록 ${data.events.length}개 불러옴`;
   });
   source.addEventListener('events', (m) => {
-    const before = turns.length;
     for (const e of JSON.parse(m.data)) applyEvent(e, true);
-    if (!viewTurn || turns.length !== before) brain.showTurn(viewTurn || turns.length);
     scheduleRender();
     $('status').textContent = `실시간 · ${clock2(Date.now())}`;
   });
