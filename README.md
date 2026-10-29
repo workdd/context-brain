@@ -51,6 +51,21 @@ HIGH  8 items never used again · 13.1k
       - src/orders/orders.service.ts  3.2k · idle 2 turns
 ```
 
+## Project doctor
+
+![Project doctor](docs/project.png)
+
+One session can be a coincidence. The project doctor reads the project's 20 most recent sessions and keeps only what repeats:
+
+| Finding | Why it is a strong signal |
+|---|---|
+| MCP server loaded in many sessions, never called | Its instructions are paid for in every session for nothing. Safe to disable for this project |
+| File re-read in session after session | A few lines in CLAUDE.md about it save reading it whole each time |
+| Command with consistently large output | Grouped by program (`npm`, `gh`, `pytest` …). File readers like `cat` and `sed` are excluded |
+| Fixed context in every session | What is spent before your first prompt: system prompt, skill list, CLAUDE.md files, hooks |
+
+Click "Analyze recent sessions" under the brain, or run `doctor --project` in the terminal. Click a session bar to open that session.
+
 ### In the Claude Code status line
 
 Add this to `~/.claude/settings.json` and the reclaimable amount follows you in every session:
@@ -100,6 +115,8 @@ npx github:workdd/context-brain                     # viewer on http://localhost
 npx github:workdd/context-brain demo                # sample session, no Claude Code needed
 npx github:workdd/context-brain export latest --redact -o my-session.html
 npx github:workdd/context-brain doctor              # findings in the terminal (--json for scripts)
+npx github:workdd/context-brain doctor --project    # repeated leaks across the project's recent sessions
+npx github:workdd/context-brain calibrate           # fit token estimates to your own sessions
 ```
 
 | Option | Meaning |
@@ -109,7 +126,9 @@ npx github:workdd/context-brain doctor              # findings in the terminal (
 | `export [file.jsonl\|latest]` | Save a session as one HTML file that replays itself |
 | `--redact` | Leave out tool output previews, commands, prompts and answer text. Home paths always become `~` |
 | `doctor [file.jsonl\|latest]` | Print findings and fixes. `--json` for machine output |
+| `doctor --project [--limit 20]` | Look across the project's recent sessions |
 | `statusline` | One line for the Claude Code status line |
+| `calibrate [--dry-run]` | Fit token coefficients to your own logs and save them to `~/.config/context-brain/tokens.json` |
 
 From a clone: `npm install && npm start`. Node.js 18+, no runtime dependencies. three.js loads from a CDN in the browser.
 
@@ -128,7 +147,9 @@ parser (lib/parse.js)
   system turn_duration / compact_boundary     → turn end / compaction
         │  Server-Sent Events (server.js, 127.0.0.1 only)
         ▼
-browser: public/app.js (three.js brain, panels, replay) + public/model.js (treemap, evidence, doctor)
+lib/tokens.js        token estimate (fitted coefficients, image size) · lib/calibrate.js fits them
+lib/project.js       parses a project's recent sessions (cached by mtime)
+browser: public/app.js (three.js brain, panels, replay) + public/model.js (treemap, evidence, doctor, project doctor)
 terminal: bin/context-brain.js doctor | statusline (same public/model.js)
 ```
 
@@ -136,10 +157,25 @@ terminal: bin/context-brain.js doctor | statusline (same public/model.js)
 - The server binds to `127.0.0.1` and refuses any path outside `~/.claude/projects`.
 - Subagent sidechains and claude-mem observer sessions are skipped.
 
+## How accurate the numbers are
+
+Per-item token counts are estimated from text, because the log only records the total context size per API call. The estimator is fitted to that measured total, not guessed:
+
+- Between two API calls where exactly one tool result arrived, the growth in measured context is that result's real cost. Regressing it on character counts gives the coefficients.
+- Fitted on 235 such samples from 455 real sessions: **ASCII 2.25 chars per token, Hangul 1.45 tokens per char**, other scripts 2.43 tokens per char, plus 34 tokens per tool result.
+- Images are counted by size, width × height / 750, which matched measured growth within 3% on 19 screenshots.
+
+| Estimator | Median error per result | Estimated / measured total |
+|---|---|---|
+| characters / 4 (the usual rule of thumb) | 53% | 0.42 |
+| fitted coefficients | **6%** (9% on held-out sessions) | **1.00** (0.95 held out) |
+
+On whole sessions, the sum of item estimates now lands at 0.8 to 1.0 of the measured context. The rest is what the log never shows, such as tool definitions and message framing. These coefficients come from one person's sessions on one model, so run `calibrate` to fit your own.
+
 ## Read it with care
 
 - **Light is not attention.** Beams and evidence come from what actually happened: tool calls, results, and item names appearing in the answer text. A sentence that uses a file without naming it shows no evidence.
-- **Neuron tokens are estimates** (characters / 4, images 1,600 each). Non-English text is under-counted. Only the ring and "Context now" are measured by the API.
+- **Neuron tokens are estimates** fitted to measured usage (see above). Only the ring and "Context now" are measured by the API directly.
 - **The compaction point is observed**, taken from recent sessions that actually compacted. Sessions on different models or settings can mix.
 - **Dead weight is a hint.** It only knows an item was not used again. Rules and other quietly consulted context are excluded.
 - **The log format is not a public spec.** A Claude Code update can hide some items. Unknown entries are skipped.
