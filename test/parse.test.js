@@ -146,3 +146,20 @@ describe('보조 함수', () => {
     expect(parseLines(lines, createState())).toHaveLength(1);
   });
 });
+
+describe('시스템 입력 · 슬래시 명령', () => {
+  const userEntry = (content, extra = {}) => ({ type: 'user', uuid: 'u1', timestamp: '2026-01-01T00:00:00Z', message: { role: 'user', content }, ...extra });
+  test('작업 알림은 턴이 아니라 대화 영역에 실린 알림이다', () => {
+    const ev = parseEntry(userEntry('<task-notification>\n<summary>Goal check-in</summary>\n</task-notification>', { promptSource: 'system' }), createState());
+    expect(ev[0]).toMatchObject({ lobe: 'dialog', kind: 'load', id: 'dlg:notice:u1', label: '알림: Goal check-in' });
+    const ev2 = parseEntry(userEntry('<task-notification>x</task-notification>'), createState());
+    expect(ev2[0].kind).toBe('load');
+    const ev3 = parseEntry(userEntry('<local-command-stdout>Goal set: x</local-command-stdout>'), createState());
+    expect(ev3[0]).toMatchObject({ kind: 'load', label: '알림: Goal set: x' });
+  });
+  test('슬래시 명령은 /명령 인자로 보여 준다', () => {
+    const ev = parseEntry(userEntry('<command-name>/goal</command-name>\n<command-message>goal</command-message>\n<command-args>더 제대로</command-args>'), createState());
+    expect(ev[0]).toMatchObject({ kind: 'use', label: '/goal 더 제대로' });
+    expect(parseEntry(userEntry('<command-name>/clear</command-name>'), createState())[0].label).toBe('/clear');
+  });
+});
