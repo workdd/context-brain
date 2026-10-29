@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Context Brain</title>
+<link rel="stylesheet" href="style.css">
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+</head>
+<body>
+<div id="stage"></div>
+
+<section id="hud" class="panel">
+  <h1>Context Brain</h1>
+  <p class="sub">Claude Code 컨텍스트 중 지금 쓰이는 영역</p>
+  <label class="row">
+    <span>세션</span>
+    <select id="session"></select>
+  </label>
+  <label class="row check"><input type="checkbox" id="follow" checked> 가장 최근 세션 따라가기</label>
+  <div class="ctx">
+    <div class="ctx-label">현재 컨텍스트 <small>(API 보고값)</small></div>
+    <div class="ctx-value" id="ctx">-</div>
+    <canvas id="spark" width="240" height="36"></canvas>
+  </div>
+  <div id="status" class="status">연결 중…</div>
+</section>
+
+<section id="legend" class="panel">
+  <h2>영역</h2>
+  <ul id="lobes"></ul>
+  <p class="note">크기 = 토큰 (글자 수/4 추정) · 빛 = 최근 사용 · 회색 = 압축으로 빠짐</p>
+</section>
+
+<section id="log" class="panel">
+  <h2>자극 기록</h2>
+  <ol id="events"></ol>
+</section>
+
+<div id="tip" class="tip" hidden></div>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>

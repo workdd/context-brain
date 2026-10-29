@@ -1,0 +1,20 @@
+{
+  "name": "context-brain",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Claude Code 세션 컨텍스트를 3D 뇌로 보여 주는 로컬 뷰어",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "jest --coverage"
+  },
+  "jest": {
+    "testEnvironment": "node",
+    "collectCoverageFrom": [
+      "lib/**/*.js"
+    ]
+  },
+  "devDependencies": {
+    "jest": "^29.7.0"
+  }
+}
