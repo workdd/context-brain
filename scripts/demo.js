@@ -12,14 +12,21 @@ const dir = path.join(root, '-home-dev-shop-api');
 fs.mkdirSync(dir);
 const file = path.join(dir, 'demo-session.jsonl');
 process.env.CLAUDE_PROJECTS_DIR = root;
-// 압축 기준은 최근 세션에서 실제로 압축이 일어난 크기로 잡는다. 데모용으로 예전 세션 하나에 압축 기록을 남겨 둔다
-const old = path.join(dir, 'earlier-session.jsonl');
-fs.writeFileSync(old, JSON.stringify({ type: 'system', subtype: 'compact_boundary', compactMetadata: { trigger: 'auto', preTokens: 60000 } }) + '\n');
-const past = new Date(Date.now() - 86400000);
-fs.utimesSync(old, past, past);
-
 const lang = process.env.CB_LANG || (Intl.DateTimeFormat().resolvedOptions().locale.startsWith('ko') ? 'ko' : 'en');
-const { boot, turns } = require('../lib/demo').demoSession(undefined, lang);
+const { demoSession } = require('../lib/demo');
+const { boot, turns } = demoSession(undefined, lang);
+
+// 프로젝트 진단에 보이도록 같은 프로젝트의 지난 세션 두 개를 남긴다.
+// 압축 기준은 최근 세션에서 실제로 압축이 일어난 크기로 잡으므로 첫 세션 끝에 압축 기록을 둔다
+[1, 2].forEach((daysAgo) => {
+  const at = Date.now() - daysAgo * 86400000;
+  const old = demoSession(at, lang);
+  const lines = [...old.boot, ...old.turns.flat(2), { type: 'ai-title', aiTitle: lang === 'ko' ? `지난 작업 ${daysAgo}` : `Earlier work ${daysAgo}` }];
+  if (daysAgo === 1) lines.push({ type: 'system', subtype: 'compact_boundary', compactMetadata: { trigger: 'auto', preTokens: 60000 } });
+  const f = path.join(dir, `earlier-${daysAgo}.jsonl`);
+  fs.writeFileSync(f, lines.map((e) => JSON.stringify(e)).join('\n') + '\n');
+  fs.utimesSync(f, new Date(at), new Date(at));
+});
 
 const live = !process.argv.includes('--static');
 const write = (entries, now = false) => fs.appendFileSync(file, entries
