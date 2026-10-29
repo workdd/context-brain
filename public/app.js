@@ -6,7 +6,7 @@ import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 
-const { squarify, splitSentences, findRefs, wasteCandidates, diagnose, describe, describeProject, labelEn } = window.CBModel;
+const { squarify, splitSentences, findRefs, diagnose, describe, describeProject, labelEn } = window.CBModel;
 const { L, lang } = window.CBLang;
 
 // ════════════════════════════════════════════════════════════
@@ -41,6 +41,7 @@ const ANSWER_LINES = 8;
 const LABEL_TOP = 8;      // 늘 이름표를 붙이는 큰 항목 수
 const LABEL_TURN = 12;    // 보고 있는 턴에서 이름표를 붙이는 항목 수
 const FLOW_MAX = 30;      // 보고 있는 턴에서 그리는 빛줄기 수
+const RED_MAX = 12;       // 붉게 표시하는 다시 안 쓰인 항목 수 (큰 것부터)
 let LOBE_NAMES = {};
 const LOBE_EN = { rules: 'Rules (CLAUDE.md)', system: 'System prompt', memory: 'Memory (hooks)', abilities: 'Tool list', dialog: 'Dialog',
   files: 'Files', shell: 'Shell', web: 'Web', agents: 'Subagents', skills: 'Skills', mcp: 'MCP', output: 'Response' };
@@ -453,7 +454,7 @@ const brain = (() => {
   renderer.domElement.addEventListener('pointermove', (ev) => {
     const n = pick(ev);
     renderer.domElement.style.cursor = n ? 'pointer' : '';
-    if (n) showTip(ev, `<b>${lobeName(n.lobe)}: ${escapeHtml(n.label)}</b><span>${L(`약 ${fmt(n.tokens)} 토큰`, `~${fmt(n.tokens)} tokens`)}${n.compacted ? L(' · 압축으로 빠짐', ' · dropped by compaction') : ''}${wasteIds.has(n.id) ? L(' · 낭비 후보', ' · likely dead weight') : ''}</span><span>${L('클릭하면 자세히', 'click for details')}</span>`);
+    if (n) showTip(ev, `<b>${lobeName(n.lobe)}: ${escapeHtml(n.label)}</b><span>${L(`약 ${fmt(n.tokens)} 토큰`, `~${fmt(n.tokens)} tokens`)}${n.compacted ? L(' · 압축으로 빠짐', ' · dropped by compaction') : ''}${wasteIds.has(n.id) ? L(' · 다시 안 쓰임', ' · never used again') : ''}</span><span>${L('클릭하면 자세히', 'click for details')}</span>`);
     else hideTip();
   });
   renderer.domElement.addEventListener('pointerleave', hideTip);
@@ -631,7 +632,7 @@ document.addEventListener('mouseover', (ev) => {
 });
 
 // ════════════════════════════════════════════════════════════
-// 화면: 예산 링 · 예산 · 면적 지도 · 낭비 후보
+// 화면: 링 · 면적 지도
 // ════════════════════════════════════════════════════════════
 function renderRing(now) {
   const box = $('ring');
@@ -655,6 +656,9 @@ let report = null;
 const SEV_LABEL = { high: L('높음', 'High'), mid: L('중간', 'Medium'), low: L('낮음', 'Low') };
 function renderDoctor() {
   report = diagnose(allEvents.slice(0, player.i), { compactAt });
+  // 뇌에서 붉게 숨쉬는 뉴런 · 면적 지도의 빗금은 진단의 '다시 안 쓰인 항목' 중 큰 것만 (숫자는 진단 카드와 같다)
+  const dead = report.findings.find((f) => f.type === 'dead-weight');
+  wasteIds = new Set(dead ? dead.items.slice(0, RED_MAX).map((i) => i.id) : []);
   const box = $('doctor-body');
   if (!report.findings.length) {
     box.innerHTML = `<div class="empty">${L('아직 고칠 것이 없습니다', 'Nothing to fix yet')}</div>`;
@@ -737,25 +741,9 @@ $('project-body').addEventListener('click', (ev) => {
 function renderBudget() {
   const now = ctxHistory[ctxHistory.length - 1];
   renderRing(now);
-  $('ctx').textContent = now != null ? `${fmt(now)} ${L('토큰', 'tokens')}` : '-';
-  const fill = $('gauge-fill');
-  const note = $('gauge-note');
-  if (now != null && compactAt) {
-    const r = Math.min(1, now / compactAt);
-    fill.style.width = (r * 100).toFixed(1) + '%';
-    fill.style.background = r > 0.85 ? 'var(--bad)' : r > 0.65 ? 'var(--warn)' : 'var(--good)';
-    note.innerHTML = L(`압축 기준 약 <b>${kfmt(compactAt)}</b> (최근 세션에서 실제 압축이 일어난 크기) · 남은 양 약 <b>${kfmt(Math.max(0, compactAt - now))}</b>`,
-      `Compaction at ~<b>${kfmt(compactAt)}</b> (where recent sessions actually compacted) · ~<b>${kfmt(Math.max(0, compactAt - now))}</b> left`) + ` · ${Math.round(r * 100)}%`;
-  } else {
-    fill.style.width = '0';
-    note.textContent = now == null ? L('아직 API 사용량 기록이 없습니다', 'no API usage recorded yet') : L('최근 세션에서 압축이 일어난 적이 없어 압축 기준을 모릅니다', 'no recent session has compacted, so the compaction point is unknown');
-  }
-  drawSpark();
 
   // 면적 지도: 지금 컨텍스트에 남아 있는 항목. 크기는 추정치라 실측과의 차이는 위에 한 줄로 밝힌다
   const live = [...neurons.values()].filter((n) => !n.compacted && n.tokens > 0);
-  const waste = wasteCandidates(live, turns.length);
-  wasteIds = new Set(waste.map((n) => n.id));
   const groups = lobeNames.map((l) => ({ lobe: l, items: live.filter((n) => n.lobe === l) }))
     .map((g) => ({ ...g, value: g.items.reduce((s, n) => s + n.tokens, 0) })).filter((g) => g.value > 0);
   const est = groups.reduce((s, g) => s + g.value, 0);
@@ -787,14 +775,6 @@ function renderBudget() {
     }
   }
   box.innerHTML = html || `<div class="empty" style="padding:12px">${L('아직 컨텍스트 항목이 없습니다', 'no context items yet')}</div>`;
-
-  const wbox = $('waste');
-  const wsum = waste.reduce((s, n) => s + n.tokens, 0);
-  wbox.innerHTML = `<h3>${L('낭비 후보', 'Likely dead weight')} ${waste.length ? L(`· 약 ${kfmt(wsum)} 토큰`, `· ~${kfmt(wsum)} tokens`) : ''}</h3>
-    <div class="why">${L('800토큰 이상 들어왔는데 마지막으로 쓰인 뒤 2턴 넘게 다시 쓰이지 않은 항목. 뇌에서 붉게 숨쉬는 뉴런', 'Items of 800+ tokens not used again for more than 2 turns. The red pulsing neurons in the brain')}</div>
-    ${waste.length ? `<ol>${waste.map((n) => `<li data-id="${escapeHtml(n.id)}"><i class="dot" style="background:${hex(LOBE_META[n.lobe].color)}"></i>
-      <span>${lobeName(n.lobe)}: ${escapeHtml(n.label)}</span><em>${kfmt(n.tokens)} · ${L(`#${n.lastTurn} 이후`, `since #${n.lastTurn}`)}</em></li>`).join('')}</ol>`
-      : `<div class="none">${L('없음', 'none')}</div>`}`;
 }
 
 function tileHtml(r, cls, id, name, val, color) {
@@ -804,24 +784,6 @@ function tileHtml(r, cls, id, name, val, color) {
     ${big ? `<b>${escapeHtml(name)}</b><span>${escapeHtml(val)}</span>` : ''}</div>`;
 }
 
-function drawSpark() {
-  const c = $('spark'), g = c.getContext('2d');
-  g.clearRect(0, 0, c.width, c.height);
-  if (ctxHistory.length < 2) return;
-  const max = Math.max(...ctxHistory, compactAt || 0) * 1.05;
-  const y = (v) => c.height - (v / max) * (c.height - 4) - 2;
-  if (compactAt) {
-    g.strokeStyle = 'rgba(255,138,138,0.5)';
-    g.setLineDash([3, 3]);
-    g.beginPath(); g.moveTo(0, y(compactAt)); g.lineTo(c.width, y(compactAt)); g.stroke();
-    g.setLineDash([]);
-  }
-  g.strokeStyle = '#7dd3ff';
-  g.lineWidth = 1.5;
-  g.beginPath();
-  ctxHistory.forEach((v, i) => { const px = (i / (ctxHistory.length - 1)) * c.width; i ? g.lineTo(px, y(v)) : g.moveTo(px, y(v)); });
-  g.stroke();
-}
 
 // ════════════════════════════════════════════════════════════
 // 화면: 턴 타임라인
@@ -943,7 +905,7 @@ function renderDetail() {
     box.innerHTML = `<button class="close" aria-label="닫기">×</button>
       <div class="d-lobe" style="color:${hex(LOBE_META[n.lobe].color)}">${lobeName(n.lobe)}</div>
       <h3>${escapeHtml(n.label)}</h3>
-      <div class="d-stats">${counts} · ${L(`약 ${fmt(n.tokens)} 토큰`, `~${fmt(n.tokens)} tokens`)}${n.compacted ? L(' · 압축으로 컨텍스트에서 빠짐', ' · dropped from context by compaction') : ''}${wasteIds.has(n.id) ? L(' · 낭비 후보', ' · likely dead weight') : ''}${usedIn ? ` · ${L('쓰인 턴', 'used in turns')} ${usedIn}` : ''}</div>
+      <div class="d-stats">${counts} · ${L(`약 ${fmt(n.tokens)} 토큰`, `~${fmt(n.tokens)} tokens`)}${n.compacted ? L(' · 압축으로 컨텍스트에서 빠짐', ' · dropped from context by compaction') : ''}${wasteIds.has(n.id) ? L(' · 다시 안 쓰임', ' · never used again') : ''}${usedIn ? ` · ${L('쓰인 턴', 'used in turns')} ${usedIn}` : ''}</div>
       <ol class="d-list">${rows}</ol>`;
   }
   box.querySelector('.close').addEventListener('click', () => { selected = null; renderDetail(); });
@@ -957,7 +919,7 @@ function scheduleRender() {
   renderTimer = setTimeout(() => {
     renderTimer = null;
     renderDoctor();        // 링이 되찾을 양을 보여 주므로 예산보다 먼저
-    renderBudget();        // 낭비 후보를 먼저 계산해야 뇌가 붉게 칠할 수 있다
+    renderBudget();
     brain.refresh();
     renderTimeline();
     renderTurnLabel();

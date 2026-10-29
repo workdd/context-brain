@@ -20,6 +20,11 @@ describe('diagnose', () => {
     expect(find(r, 'big-output')).toMatchObject({ severity: 'high', tokens: 12000 });
   });
 
+  test('다시 안 쓰인 항목은 도구 입력(명령 · 쓴 내용)까지 센다', () => {
+    const r = diagnose([prompt(1), { ...use('sh:1', 'shell'), tokens: 900 }, res('sh:1', 'shell', 100), prompt(2), prompt(3)]);
+    expect(find(r, 'dead-weight').items[0]).toMatchObject({ id: 'sh:1', tokens: 1000 });
+  });
+
   test('들어와서 2턴 넘게 안 쓰인 항목은 되찾을 양에 들어가고, 압축 뒤에는 사라진다', () => {
     const ev = [prompt(1), use('file:a', 'files'), res('file:a', 'files', 2000), prompt(2), prompt(3)];
     const r = diagnose(ev);

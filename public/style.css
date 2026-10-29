@@ -39,15 +39,8 @@ small { color: var(--dim); font-weight: 400; font-size: 11px; }
 main { padding: 16px 20px 40px; display: flex; flex-direction: column; gap: 16px; max-width: 1680px; margin: 0 auto; }
 
 /* 예산 */
-.budget-head { display: grid; grid-template-columns: auto 1fr auto; gap: 24px; align-items: center; }
 .big { font-size: 26px; font-weight: 650; font-variant-numeric: tabular-nums; line-height: 1.2; }
-.gauge-bar { height: 10px; border-radius: 6px; background: rgba(255, 255, 255, 0.06); overflow: hidden; }
-.gauge-bar i { display: block; height: 100%; width: 0; background: var(--good); border-radius: 6px; transition: width 0.4s, background 0.4s; }
-.gauge-note { margin-top: 6px; font-size: 12px; color: var(--dim); }
-.gauge-note b { color: var(--text); font-weight: 600; }
-#spark { width: 220px; height: 44px; }
-.budget-body { display: grid; grid-template-columns: 1fr 300px; gap: 16px; margin-top: 14px; }
-#treemap { position: relative; height: 230px; margin-top: 6px; border-radius: 8px; overflow: hidden; background: rgba(255, 255, 255, 0.02); }
+#treemap { position: relative; height: 230px; border-radius: 8px; overflow: hidden; background: rgba(255, 255, 255, 0.02); }
 .tile { position: absolute; border: 1px solid var(--bg); border-radius: 4px; padding: 4px 6px; overflow: hidden;
   cursor: pointer; font-size: 11px; line-height: 1.3; color: #0b0f19; }
 .tile:hover { filter: brightness(1.15); }
@@ -55,15 +48,6 @@ main { padding: 16px 20px 40px; display: flex; flex-direction: column; gap: 16px
 .tile span { opacity: 0.75; font-variant-numeric: tabular-nums; }
 .tile.waste { outline: 2px dashed rgba(255, 138, 138, 0.9); outline-offset: -3px; }
 .tile.old { opacity: 0.55; }
-#waste h3 { margin: 0; font-size: 12px; color: var(--bad); }
-#waste .why { font-size: 11px; color: var(--dim); margin: 2px 0 8px; }
-#waste ol { list-style: none; margin: 0; padding: 0; max-height: 190px; overflow-y: auto; }
-#waste li { display: grid; grid-template-columns: 8px 1fr auto; gap: 8px; align-items: center; padding: 4px 0;
-  border-top: 1px solid var(--line); cursor: pointer; font-size: 12px; }
-#waste li:hover span { text-decoration: underline; }
-#waste li span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-#waste li em { font-style: normal; color: var(--dim); font-size: 11px; font-variant-numeric: tabular-nums; }
-#waste .none { font-size: 12px; color: var(--dim); }
 .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; flex: none; }
 
 /* 타임라인 */
@@ -168,12 +152,10 @@ body.brain-big #top { z-index: 0; }
 .tip span { color: var(--dim); display: block; }
 
 @media (max-width: 1100px) {
-  .budget-body { grid-template-columns: 1fr; }
 }
 @media (max-width: 700px) {
   #top { flex-wrap: wrap; padding: 10px 16px; }
   main { padding: 12px 16px 32px; }
-  .budget-head { grid-template-columns: 1fr; gap: 10px; }
   .turn-body { padding-left: 14px; }
   #stage { height: 60vh; min-height: 360px; }
   #key { display: none; }

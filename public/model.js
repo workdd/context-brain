@@ -77,15 +77,7 @@
     return hits;
   }
 
-  // ── 낭비 후보 ─────────────────────────────────────────────
-  // 컨텍스트에 남아 있고 크지만, 마지막으로 쓰인 뒤 idleTurns 턴 넘게 다시 쓰이지 않은 항목
   const WASTE_LOBES = new Set(['files', 'shell', 'web', 'agents', 'mcp', 'skills']);
-  function wasteCandidates(neurons, currentTurn, { minTokens = 800, idleTurns = 2 } = {}) {
-    return neurons
-      .filter((n) => WASTE_LOBES.has(n.lobe) && !n.compacted && n.tokens >= minTokens && n.lastTurn > 0
-        && currentTurn - n.lastTurn >= idleTurns)
-      .sort((a, b) => b.tokens - a.tokens);
-  }
 
   // ── 컨텍스트 진단 ─────────────────────────────────────────
   // 이벤트 기록만 보고 "어디서 토큰이 새는지 · 어떻게 줄이는지" 를 고른다.
@@ -133,8 +125,9 @@
       }
       if ((e.kind === 'result' || e.kind === 'load' || e.kind === 'use' || e.kind === 'ref') && WASTE_LOBES.has(e.lobe)) {
         const x = live.get(e.id) || { id: e.id, label: e.label, lobe: e.lobe, tokens: 0, lastTurn: 0 };
-        if (e.kind === 'result' || e.kind === 'load') x.tokens += tok;
-        x.lastTurn = turn;
+        // 화면의 뉴런과 같은 셈: 도구 입력(명령 · 쓴 내용)도 컨텍스트에 남으므로 더하고, 로드는 큰 쪽 하나
+        x.tokens = e.kind === 'load' ? Math.max(x.tokens, tok) : x.tokens + tok;
+        if (e.kind !== 'load' || e.lobe === 'skills') x.lastTurn = turn;
         live.set(e.id, x);
       }
     }
@@ -438,6 +431,6 @@
     return picked.sort((a, b) => a.k - b.k);
   }
 
-  return { squarify, splitSentences, needlesOf, findRefs, wasteCandidates, diagnose, describe, labelEn, projectReport, describeProject, shellProgramOf,
+  return { squarify, splitSentences, needlesOf, findRefs, diagnose, describe, labelEn, projectReport, describeProject, shellProgramOf,
     contextSeries, growthSpikes };
 });

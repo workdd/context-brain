@@ -1,4 +1,4 @@
-const { squarify, splitSentences, needlesOf, findRefs, wasteCandidates } = require('../public/model');
+const { squarify, splitSentences, needlesOf, findRefs } = require('../public/model');
 
 describe('squarify', () => {
   test('면적은 값에 비례하고 사각형 안에 들어간다', () => {
@@ -47,17 +47,6 @@ describe('문장과 근거', () => {
   });
 });
 
-describe('wasteCandidates', () => {
-  const n = (id, lobe, tokens, lastTurn, compacted = false) => ({ id, lobe, tokens, lastTurn, compacted });
-  test('크고 오래 안 쓰인 항목만, 큰 순서로', () => {
-    const list = [
-      n('a', 'files', 5000, 1), n('b', 'files', 9000, 2), n('c', 'files', 9000, 4),
-      n('d', 'rules', 9000, 1), n('e', 'files', 100, 1), n('f', 'shell', 3000, 1, true), n('g', 'web', 2000, 0),
-    ];
-    expect(wasteCandidates(list, 4).map((x) => x.id)).toEqual(['b', 'a']);
-    expect(wasteCandidates(list, 4, { minTokens: 6000, idleTurns: 1 }).map((x) => x.id)).toEqual(['b']);
-  });
-});
 
 describe('contextSeries', () => {
   const { contextSeries, growthSpikes } = require('../public/model.js');
