@@ -11,7 +11,7 @@ const AX = 0.95, AY = 0.78, AZ = 1.2; // 대뇌 타원체 반지름
 
 // 영역마다 색과 자리. dir 은 표면 방향, inner 는 뇌 안쪽 고정 위치.
 const LOBE_META = {
-  output:    { color: 0xffffff, dir: [0, 0.15, 1] },
+  output:    { color: 0xc9d1e0, dir: [0, 0.15, 1] },
   rules:     { color: 0xffb347, dir: [0, 0.75, 0.6] },
   abilities: { color: 0x5fd3ff, dir: [0, 1, -0.15] },
   agents:    { color: 0xff6fb5, dir: [-0.75, 0.45, 0.45] },
@@ -29,6 +29,8 @@ const COMPACTABLE = new Set(['dialog', 'files', 'shell', 'web', 'agents', 'mcp',
 const KIND_LABEL = { use: '사용', result: '결과', load: '로드', ref: '언급' };
 const KIND_WEIGHT = { use: 1.2, result: 0.9, load: 0.7, ref: 1.0 };
 const DECAY_SEC = 3.5;
+const RETURN_COLOR = 0xffffff;
+const HISTORY_MAX = 40;
 
 function surface(dir, scale = 0.93) {
   const [x, y, z] = dir;
@@ -82,7 +84,7 @@ renderer.domElement.addEventListener('pointerdown', () => { controls.autoRotate 
 
 const composer = new EffectComposer(renderer);
 composer.addPass(new RenderPass(scene, camera));
-const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 1.15, 0.55, 0.32);
+const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.55, 0.45, 0.5);
 composer.addPass(bloom);
 composer.addPass(new OutputPass());
 
@@ -176,7 +178,7 @@ function getNeuron(e) {
   const mesh = new THREE.Mesh(neuronGeo, mat);
   mesh.position.copy(neuronPosition(e.lobe, e.id));
   neuronGroup.add(mesh);
-  n = { id: e.id, lobe: e.lobe, label: e.label, mesh, act: 0, tokens: 0, uses: 0, counts: {}, compacted: false, last: null };
+  n = { id: e.id, lobe: e.lobe, label: e.label, mesh, act: 0, tokens: 0, uses: 0, counts: {}, compacted: false, last: null, history: [] };
   mesh.userData.neuron = n;
   neurons.set(e.id, n);
   return n;
@@ -191,9 +193,9 @@ function spawnPulse(from, to, color) {
   const curve = new THREE.QuadraticBezierCurve3(from.clone(), mid, to.clone());
   const line = new THREE.Line(
     new THREE.BufferGeometry().setFromPoints(curve.getPoints(32)),
-    new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending, depthWrite: false }),
+    new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.35, blending: THREE.AdditiveBlending, depthWrite: false }),
   );
-  const dot = new THREE.Mesh(dotGeo, new THREE.MeshBasicMaterial({ color: new THREE.Color(color).multiplyScalar(3), toneMapped: false }));
+  const dot = new THREE.Mesh(dotGeo, new THREE.MeshBasicMaterial({ color: new THREE.Color(color).multiplyScalar(1.3), toneMapped: false }));
   scene.add(line, dot);
   pulses.push({ curve, line, dot, age: 0, life: 1.1 });
 }
@@ -222,14 +224,12 @@ function applyEvent(e, animate) {
   if (e.tokens) n.tokens = e.kind === 'load' ? Math.max(n.tokens, e.tokens) : n.tokens + e.tokens;
   if (e.kind !== 'ref') n.compacted = false;
   n.last = e;
+  n.history.push(e);
+  if (n.history.length > HISTORY_MAX) n.history.shift();
   if (!animate) return;
-  n.act = Math.min(2.2, n.act + (KIND_WEIGHT[e.kind] || 0.8));
-  const out = anchors.output;
-  const color = LOBE_META[e.lobe].color;
-  if (e.lobe !== 'output') {
-    if (e.kind === 'use') spawnPulse(out, n.mesh.position, color); // 꺼내러 감
-    else if (e.kind === 'result' || e.kind === 'ref') spawnPulse(n.mesh.position, out, color); // 내용이 돌아옴
-  }
+  n.act = Math.min(1.4, n.act + (KIND_WEIGHT[e.kind] || 0.8));
+  applyEventPulse(e);
+  if (selected === n) renderDetail();
 }
 
 // ── 화면 패널 ──────────────────────────────────────────────
@@ -248,9 +248,9 @@ function logEvent(e, fresh) {
   } else {
     const lobeName = LOBE_NAMES[e.lobe] || e.lobe;
     li.innerHTML = `<span class="time">${time}</span><span class="dot" style="background:${hex(LOBE_META[e.lobe].color)}"></span>
-      <span class="what"><span class="kind">${KIND_LABEL[e.kind] || e.kind}</span>${escapeHtml(e.label || '')}
-      <div class="meta">${lobeName}${e.tokens ? ` · 약 ${fmt(e.tokens)} 토큰` : ''}${e.detail ? ' · ' + escapeHtml(e.detail) : ''}</div></span>`;
-    li.addEventListener('click', () => { const n = neurons.get(e.id); if (n) { n.act = 2; focusOn(n.mesh.position); } });
+      <span class="what"><span class="kind">${KIND_LABEL[e.kind] || e.kind}</span>${lobeName}: ${escapeHtml(e.label || '')}
+      <div class="meta">${e.tokens ? ` · 약 ${fmt(e.tokens)} 토큰` : ''}${e.detail ? ' · ' + escapeHtml(e.detail) : ''}</div></span>`;
+    li.addEventListener('click', () => { const n = neurons.get(e.id); if (n) select(n); });
   }
   if (fresh) li.classList.add('fresh');
   const list = $('events');
@@ -316,12 +316,53 @@ renderer.domElement.addEventListener('pointermove', (ev) => {
   if (!hit) { tip.hidden = true; return; }
   const n = hit.object.userData.neuron;
   const counts = Object.entries(n.counts).map(([k, v]) => `${KIND_LABEL[k] || k} ${v}`).join(' · ');
-  tip.innerHTML = `<b>${escapeHtml(n.label)}</b><span>${LOBE_NAMES[n.lobe] || n.lobe}${n.compacted ? ' · 압축으로 빠짐' : ''}</span>
+  tip.innerHTML = `<b>${LOBE_NAMES[n.lobe] || n.lobe}: ${escapeHtml(n.label)}</b><span>${n.compacted ? '압축으로 빠짐 · ' : ''}클릭하면 자세히</span>
     <span>${counts}</span><span>약 ${fmt(n.tokens)} 토큰</span>${n.last && n.last.detail ? `<span>${escapeHtml(n.last.detail)}</span>` : ''}`;
   tip.style.left = Math.min(ev.clientX + 14, innerWidth - 330) + 'px';
   tip.style.top = ev.clientY + 14 + 'px';
   tip.hidden = false;
 });
+
+// 클릭하면 상세 패널. 드래그로 돌린 것은 클릭으로 치지 않는다
+let downAt = null;
+let selected = null;
+renderer.domElement.addEventListener('pointerdown', (ev) => { downAt = [ev.clientX, ev.clientY]; });
+renderer.domElement.addEventListener('pointerup', (ev) => {
+  if (!downAt || Math.hypot(ev.clientX - downAt[0], ev.clientY - downAt[1]) > 5) return;
+  mouse.set((ev.clientX / innerWidth) * 2 - 1, -(ev.clientY / innerHeight) * 2 + 1);
+  raycaster.setFromCamera(mouse, camera);
+  const hit = raycaster.intersectObjects(neuronGroup.children)[0];
+  if (hit) select(hit.object.userData.neuron);
+});
+
+function select(n) {
+  selected = n;
+  n.act = Math.max(n.act, 1);
+  focusOn(n.mesh.position);
+  renderDetail();
+}
+
+function renderDetail() {
+  const box = $('detail');
+  if (!selected) { box.hidden = true; return; }
+  const n = selected;
+  const counts = Object.entries(n.counts).map(([k, v]) => `${KIND_LABEL[k] || k} ${v}회`).join(' · ');
+  const rows = n.history.slice().reverse().map((e) => {
+    const time = e.t ? new Date(e.t).toLocaleTimeString('ko-KR', { hour12: false }) : '';
+    return `<li><div class="d-head"><span class="kind">${KIND_LABEL[e.kind] || e.kind}</span>${time}
+      ${e.tokens ? ` · 약 ${fmt(e.tokens)} 토큰` : ''}${e.error ? ' · <b class="err">오류</b>' : ''}${e.tool ? ' · ' + e.tool : ''}</div>
+      ${e.input ? `<pre>${escapeHtml(e.input)}</pre>` : e.detail ? `<div class="d-note">${escapeHtml(e.detail)}</div>` : ''}
+      ${e.preview ? `<pre class="out">${escapeHtml(e.preview)}</pre>` : ''}</li>`;
+  }).join('');
+  box.innerHTML = `<button class="close" aria-label="닫기">×</button>
+    <div class="d-lobe" style="color:${hex(LOBE_META[n.lobe].color)}">${LOBE_NAMES[n.lobe] || n.lobe}</div>
+    <h3>${escapeHtml(n.label)}</h3>
+    <div class="d-stats">${counts} · 약 ${fmt(n.tokens)} 토큰${n.compacted ? ' · 압축으로 컨텍스트에서 빠짐' : ''}</div>
+    <div class="d-id">${escapeHtml(n.id)}</div>
+    <ol class="d-list">${rows}</ol>`;
+  box.querySelector('.close').addEventListener('click', () => { selected = null; renderDetail(); });
+  box.hidden = false;
+}
 
 // ── 세션 연결 ─────────────────────────────────────────────
 let source = null;
@@ -330,6 +371,8 @@ let currentFile = null;
 function reset() {
   for (const n of neurons.values()) { neuronGroup.remove(n.mesh); n.mesh.material.dispose(); }
   neurons.clear();
+  selected = null;
+  renderDetail();
   ctxHistory = [];
   $('events').innerHTML = '';
 }
@@ -364,9 +407,8 @@ function connect(file) {
 function applyEventPulse(e) {
   const n = neurons.get(e.id);
   if (!n || e.lobe === 'output') return;
-  const color = LOBE_META[e.lobe].color;
-  if (e.kind === 'use') spawnPulse(anchors.output, n.mesh.position, color);
-  else if (e.kind === 'result' || e.kind === 'ref') spawnPulse(n.mesh.position, anchors.output, color);
+  if (e.kind === 'use') spawnPulse(anchors.output, n.mesh.position, LOBE_META[e.lobe].color); // 나감: 영역 색
+  else if (e.kind === 'result' || e.kind === 'ref') spawnPulse(n.mesh.position, anchors.output, RETURN_COLOR); // 돌아옴: 흰색
 }
 
 async function refreshSessions() {
@@ -412,7 +454,7 @@ function frame() {
       n.mesh.material.color.copy(grey).multiplyScalar(0.35 + n.act);
       n.mesh.material.opacity = 0.45;
     } else {
-      n.mesh.material.color.copy(ls.color).multiplyScalar(0.3 + 1.6 * n.act);
+      n.mesh.material.color.copy(ls.color).multiplyScalar(0.35 + 0.8 * n.act);
       n.mesh.material.opacity = 1;
     }
   }
@@ -424,7 +466,7 @@ function frame() {
     const li = pointLobe[i];
     if (li >= 0) {
       const ls = lobeState[lobeNames[li]];
-      if (ls.act > 0.01) tmp.lerp(ls.color, Math.min(1, ls.act * pointWeight[i] * 0.9)).multiplyScalar(1 + ls.act * pointWeight[i] * 1.6);
+      if (ls.act > 0.01) tmp.lerp(ls.color, Math.min(1, ls.act * pointWeight[i] * 0.6)).multiplyScalar(1 + ls.act * pointWeight[i] * 0.6);
     }
     if (globalFlash > 0.01) tmp.lerp(FLASH, globalFlash * 0.5);
     shellColors[i * 3] = tmp.r; shellColors[i * 3 + 1] = tmp.g; shellColors[i * 3 + 2] = tmp.b;
@@ -439,7 +481,7 @@ function frame() {
     p.age += dt;
     const k = p.age / p.life;
     p.dot.position.copy(p.curve.getPoint(Math.min(1, k)));
-    p.line.material.opacity = 0.5 * (1 - k);
+    p.line.material.opacity = 0.35 * (1 - k);
     if (k >= 1) {
       scene.remove(p.line, p.dot);
       p.line.geometry.dispose(); p.line.material.dispose(); p.dot.material.dispose();

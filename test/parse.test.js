@@ -1,4 +1,4 @@
-const { createState, parseEntry, parseLines, shellProgram, estTokens } = require('../lib/parse');
+const { createState, parseEntry, parseLines, shellProgram, estTokens, preview, inputText } = require('../lib/parse');
 
 const T = '2026-10-29T01:07:05.000Z';
 const assistant = (content, usage) => ({ type: 'assistant', timestamp: T, message: { model: 'm', content, usage } });
@@ -22,12 +22,22 @@ describe('parseEntry', () => {
     expect(s.pending.size).toBe(0);
   });
 
+  test('Bash 는 명령 한 번이 뉴런 하나, 이름은 description', () => {
+    const s = createState();
+    const [a] = parseEntry(assistant([{ type: 'tool_use', id: 'b1', name: 'Bash', input: { command: 'python3 -c 1', description: '토큰 검증' } }]), s);
+    const [b] = parseEntry(assistant([{ type: 'tool_use', id: 'b2', name: 'Bash', input: { command: 'python3 -c 2' } }]), s);
+    expect(a).toMatchObject({ lobe: 'shell', id: 'sh:b1', label: '토큰 검증', input: 'python3 -c 1', tool: 'Bash' });
+    expect(b).toMatchObject({ id: 'sh:b2', label: 'python3' });
+    const [r] = parseEntry(user([{ type: 'tool_result', tool_use_id: 'b1', content: 'ok' }]), s);
+    expect(r).toMatchObject({ id: 'sh:b1', kind: 'result', preview: 'ok' });
+  });
+
   test('짝 없는 tool_result 는 무시한다', () => {
     expect(parseEntry(user([{ type: 'tool_result', tool_use_id: 'nope', content: 'x' }]), createState())).toEqual([]);
   });
 
   test.each([
-    ['Bash', { command: 'cd ~/x && git log' }, 'shell', 'sh:git'],
+    ['Bash', { command: 'cd ~/x && git log' }, 'shell', 'sh:x'],
     ['Grep', { pattern: 'foo' }, 'files', 'search:foo'],
     ['WebSearch', { query: 'q' }, 'web', 'web:search'],
     ['WebFetch', { url: 'https://example.com/a' }, 'web', 'web:example.com'],
@@ -110,6 +120,17 @@ describe('보조 함수', () => {
     expect(estTokens({ a: 1 })).toBe(2);
     const img = { type: 'image', source: { type: 'base64', data: 'A'.repeat(100000) } };
     expect(estTokens([img, { type: 'text', text: 'abcd' }])).toBe(1601);
+  });
+  test('preview 는 이미지를 자리표시로 바꾸고 길이를 자른다', () => {
+    expect(preview([{ type: 'image' }, { type: 'text', text: 'hi' }])).toBe('[이미지]\nhi');
+    expect(preview('x'.repeat(1000))).toHaveLength(600);
+    expect(preview(null)).toBe('');
+  });
+  test('inputText 는 도구별로 읽을 부분을 뽑는다', () => {
+    expect(inputText('Edit', { file_path: '/a', old_string: 'o', new_string: 'n' })).toBe('/a\n- o\n+ n');
+    expect(inputText('Bash', {})).toBe('');
+    expect(inputText('Grep', { pattern: 'p' })).toContain('"pattern": "p"');
+    expect(inputText('Grep')).toBe('{}');
   });
   test('parseLines 는 깨진 줄과 빈 줄을 건너뛴다', () => {
     const lines = ['', '{broken', JSON.stringify(user('hi'))];
