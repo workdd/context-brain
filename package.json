@@ -1,23 +1,58 @@
 {
   "name": "context-brain",
-  "version": "0.1.0",
-  "private": true,
-  "description": "Claude Code 세션 컨텍스트를 3D 뇌로 보여 주는 로컬 뷰어",
+  "version": "0.2.0",
+  "description": "Watch what Claude Code is thinking with: a live 3D brain of your session context (local, read-only)",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js",
+    "start": "node bin/context-brain.js",
     "test": "jest --coverage",
-    "demo": "node scripts/demo.js"
+    "demo": "node scripts/demo.js",
+    "build:web": "node scripts/build-web.js",
+    "deploy": "wrangler deploy",
+    "preview": "wrangler dev"
   },
   "jest": {
     "testEnvironment": "node",
     "collectCoverageFrom": [
       "lib/**/*.js",
-      "public/model.js"
+      "public/model.js",
+      "!lib/open.js"
     ]
   },
   "devDependencies": {
-    "jest": "^29.7.0"
+    "jest": "^29.7.0",
+    "wrangler": "^4.155.0"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "bin": {
+    "context-brain": "bin/context-brain.js"
+  },
+  "files": [
+    "bin/",
+    "lib/",
+    "public/",
+    "scripts/demo.js",
+    "server.js",
+    "README.md",
+    "README.ko.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "claude-code",
+    "claude",
+    "context",
+    "visualization",
+    "three.js",
+    "llm",
+    "observability",
+    "agents"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/workdd/context-brain.git"
+  },
+  "homepage": "https://github.com/workdd/context-brain"
 }

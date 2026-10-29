@@ -21,6 +21,11 @@
   <select id="session" aria-label="세션"></select>
   <label class="check"><input type="checkbox" id="follow" checked> 최근 세션 따라가기</label>
   <span id="status" class="status">연결 중…</span>
+  <span class="export-box">
+    <button id="export" type="button" title="이 세션을 서버 없이 열리는 HTML 파일 하나로 저장">공유용 HTML</button>
+    <label class="check" title="결과 미리보기 · 명령 · 입력 · 답변 본문을 빼고 저장"><input type="checkbox" id="redact" checked> 내용 가리기</label>
+  </span>
+  <a class="repo" href="https://github.com/workdd/context-brain" target="_blank" rel="noopener">GitHub</a>
 </header>
 
 <main>
@@ -48,9 +53,15 @@
         <span><i class="k-old"></i>회색 = 압축으로 빠짐</span>
         <span><i class="k-waste"></i>붉게 숨쉼 = 낭비 후보</span>
         <span><i class="k-flow"></i>흰 입자 = 답변에 이름이 나온 근거</span>
-        <span class="k-tip">영역 이름을 누르면 확대 · 뉴런을 누르면 상세</span>
+        <span class="k-tip">영역 이름을 누르면 확대 · 뉴런을 누르면 상세 · Space 재생</span>
       </div>
       <aside id="detail" class="overlay" hidden></aside>
+      <div id="player" class="overlay">
+        <button id="play" type="button">▶ 처음부터 재생</button>
+        <input id="scrub" type="range" min="0" max="0" value="0" aria-label="재생 위치">
+        <select id="speed" aria-label="재생 속도"><option value="4">4배</option><option value="16" selected>16배</option><option value="64">64배</option></select>
+        <span id="play-time"></span>
+      </div>
     </div>
   </section>
 

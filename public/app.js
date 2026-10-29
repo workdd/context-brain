@@ -165,6 +165,8 @@ function evidenceOf(tr) {
   const cands = [...neurons.values()].filter((n) => n.lobe !== 'output' && n.lobe !== 'dialog' && [...n.turns].some((t) => t <= tr.n));
   const ids = new Set();
   for (const s of tr.answers.flatMap(splitSentences)) for (const id of findRefs(s, cands)) ids.add(id);
+  // 내용을 가린 공유 파일에는 답변 본문이 없다. 파서가 남긴 언급 기록으로 대신한다
+  if (!tr.answers.length) for (const it of tr.items.values()) if (it.kinds.has('ref')) ids.add(it.n.id);
   return ids;
 }
 
@@ -565,6 +567,7 @@ addEventListener('keydown', (ev) => {
   if (ev.target.closest('input, select, textarea')) return;
   if (ev.key === '[') $('turn-prev').click();
   if (ev.key === ']') $('turn-next').click();
+  if (ev.key === ' ') { ev.preventDefault(); $('play').click(); }
 });
 
 // ════════════════════════════════════════════════════════════
@@ -863,6 +866,65 @@ function scheduleRender() {
 new ResizeObserver(scheduleRender).observe($('treemap'));
 
 // ════════════════════════════════════════════════════════════
+// 재생: 세션을 처음부터 다시 흘려 본다
+// ════════════════════════════════════════════════════════════
+let allEvents = [];        // 이 세션의 모든 이벤트. player.i 까지가 화면에 반영돼 있다
+const player = { on: false, i: 0, timer: null };
+const atHead = () => !player.on && player.i === allEvents.length;
+
+function applyUpTo(k) {
+  reset();
+  for (let j = 0; j < k; j++) applyEvent(allEvents[j], false);
+  player.i = k;
+  scheduleRender();
+  renderPlayer();
+}
+function step() {
+  if (player.i >= allEvents.length) { stopPlay(); return; }
+  const e = allEvents[player.i++];
+  applyEvent(e, true);
+  scheduleRender();
+  renderPlayer();
+  const next = allEvents[player.i];
+  const gap = next && e.t && next.t ? (new Date(next.t) - new Date(e.t)) / Number($('speed').value) : 0;
+  player.timer = setTimeout(step, Math.max(25, Math.min(1500, gap || 0)));
+}
+function startPlay() {
+  if (player.i >= allEvents.length) applyUpTo(0);
+  player.on = true;
+  step();
+}
+function stopPlay() {
+  player.on = false;
+  clearTimeout(player.timer);
+  renderPlayer();
+}
+function renderPlayer() {
+  const total = allEvents.length;
+  const sc = $('scrub');
+  sc.max = total;
+  sc.value = player.i;
+  $('play').textContent = player.on ? '❚❚ 멈춤' : player.i >= total ? '▶ 처음부터 재생' : '▶ 이어서 재생';
+  const last = allEvents[player.i - 1];
+  const behind = total - player.i;
+  $('play-time').textContent = player.i >= total ? '지금' : `${clock2(last && last.t)} · 턴 ${turns.length} · 남은 기록 ${behind}`;
+  $('player').classList.toggle('rewound', player.i < total);
+}
+$('play').addEventListener('click', () => (player.on ? stopPlay() : startPlay()));
+let scrubFrame = 0;
+$('scrub').addEventListener('input', () => {
+  const k = Number($('scrub').value);  // stopPlay 가 막대를 현재 위치로 되돌리기 전에 읽는다
+  const was = player.on;
+  stopPlay();
+  $('scrub').value = k;
+  cancelAnimationFrame(scrubFrame);
+  scrubFrame = requestAnimationFrame(() => {
+    applyUpTo(k);
+    if (was) startPlay();
+  });
+});
+
+// ════════════════════════════════════════════════════════════
 // 세션 연결
 // ════════════════════════════════════════════════════════════
 let source = null;
@@ -891,14 +953,20 @@ function connect(file) {
     LOBE_NAMES = data.lobes;
     currentFile = data.file;
     $('session').value = currentFile;
-    for (const e of data.events) applyEvent(e, false);
-    scheduleRender();
+    stopPlay();
+    allEvents = data.events;
+    applyUpTo(allEvents.length);
     $('status').textContent = `기록 ${data.events.length}개 불러옴`;
   });
   source.addEventListener('events', (m) => {
-    for (const e of JSON.parse(m.data)) applyEvent(e, true);
-    scheduleRender();
-    $('status').textContent = `실시간 · ${clock2(Date.now())}`;
+    const head = atHead();
+    allEvents.push(...JSON.parse(m.data));
+    if (head) {
+      for (; player.i < allEvents.length; player.i++) applyEvent(allEvents[player.i], true);
+      scheduleRender();
+      $('status').textContent = `실시간 · ${clock2(Date.now())}`;
+    } else $('status').textContent = '재생 중 · 새 기록은 재생이 끝나면 이어서 반영';
+    renderPlayer();
   });
   source.onerror = () => { $('status').textContent = '연결 끊김 · 다시 시도 중'; };
 }
@@ -923,6 +991,23 @@ async function refreshSessions() {
 $('session').addEventListener('change', (ev) => { $('follow').checked = false; connect(ev.target.value); });
 $('follow').addEventListener('change', (ev) => { if (ev.target.checked) refreshSessions(); });
 
-fetch('/api/limits').then((r) => r.json()).then((l) => { compactAt = l.compactAt; scheduleRender(); }).catch(() => {});
-refreshSessions().then(() => connect('latest'));
-setInterval(refreshSessions, 5000);
+$('export').addEventListener('click', () => {
+  if (!currentFile) return;
+  location.href = '/api/export?file=' + encodeURIComponent(currentFile) + ($('redact').checked ? '&redact=1' : '');
+});
+
+// 공유된 HTML 은 기록을 품고 있다. 서버 없이 처음부터 재생한다
+const embedded = $('cb-data');
+if (embedded) {
+  const d = JSON.parse(embedded.textContent);
+  document.body.classList.add('static');
+  LOBE_NAMES = d.lobes || {};
+  compactAt = d.compactAt || null;
+  allEvents = d.events || [];
+  $('status').textContent = d.title ? `공유된 세션 · ${d.title}` : '공유된 세션';
+  if (d.autoplay) { applyUpTo(0); setTimeout(startPlay, 800); } else applyUpTo(allEvents.length);
+} else {
+  fetch('/api/limits').then((r) => r.json()).then((l) => { compactAt = l.compactAt; scheduleRender(); }).catch(() => {});
+  refreshSessions().then(() => connect('latest'));
+  setInterval(refreshSessions, 5000);
+}
