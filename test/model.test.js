@@ -58,3 +58,46 @@ describe('wasteCandidates', () => {
     expect(wasteCandidates(list, 4, { minTokens: 6000, idleTurns: 1 }).map((x) => x.id)).toEqual(['b']);
   });
 });
+
+describe('contextSeries', () => {
+  const { contextSeries, growthSpikes } = require('../public/model.js');
+  const ev = [
+    { kind: 'load', lobe: 'rules', id: 'rule:a', label: 'CLAUDE.md', tokens: 1000 },
+    { kind: 'use', lobe: 'dialog', id: 'dlg:1', label: 'p1', tokens: 10 },
+    { kind: 'usage', tokens: 2000, t: 't1' },
+    { kind: 'usage', tokens: 2000, t: 't1' },                 // 같은 응답의 두 번째 줄
+    { kind: 'use', lobe: 'files', id: 'file:a', label: 'a.ts', tokens: 5 },
+    { kind: 'result', lobe: 'files', id: 'file:a', label: 'a.ts', tokens: 3000 },
+    { kind: 'result', lobe: 'shell', id: 'sh:1', label: 'test', tokens: 500 },
+    { kind: 'usage', tokens: 6000, t: 't2' },
+    { kind: 'compact', tokens: 6000 },
+    { kind: 'use', lobe: 'dialog', id: 'dlg:2', label: 'p2', tokens: 10 },
+    { kind: 'usage', tokens: 1500, t: 't3' },
+  ];
+  const r = contextSeries(ev);
+
+  test('API 호출마다 표본 하나, 같은 크기가 이어지면 하나로 본다', () => {
+    expect(r.samples.map((x) => x.ctx)).toEqual([2000, 6000, 1500]);
+    expect(r.samples.map((x) => x.turn)).toEqual([1, 1, 2]);
+    expect(r.samples[1].delta).toBe(4000);
+  });
+
+  test('직전 호출 뒤 들어온 항목을 큰 순서로 붙인다', () => {
+    expect(r.samples[1].added.map((a) => [a.id, a.tokens])).toEqual([['file:a', 3005], ['sh:1', 500]]);
+    expect(r.samples[1].addedTotal).toBe(3505);
+    expect(r.samples[1].lobes).toEqual({ rules: 1000, dialog: 10, files: 3005, shell: 500 });
+  });
+
+  test('압축하면 대화 · 파일 · 셸 같은 영역은 빠지고 규칙은 남는다', () => {
+    expect(r.samples[2].lobes).toEqual({ rules: 1000, dialog: 10 });
+    expect(r.compactions).toEqual([{ i: 8, tokens: 6000, at: 2 }]);
+    expect(r.turns.map((t) => [t.n, t.at])).toEqual([[1, 0], [2, 2]]);
+  });
+
+  test('가장 크게 불어난 지점을 서로 떨어뜨려 고른다', () => {
+    const s = [0, 100, 5000, 4000, 50, 3000].map((d) => ({ delta: d }));
+    expect(growthSpikes(s, 2, 2).map((x) => x.k)).toEqual([2, 5]);
+    expect(growthSpikes(s, 3, 1).map((x) => x.k)).toEqual([2, 3, 5]);
+    expect(growthSpikes([], 2, 2)).toEqual([]);
+  });
+});

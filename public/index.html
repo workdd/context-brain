@@ -55,14 +55,18 @@
         <span><i class="k-old"></i><b data-en="grey = dropped by compaction">회색 = 압축으로 빠짐</b></span>
         <span><i class="k-waste"></i><b data-en="red pulse = likely dead weight">붉게 숨쉼 = 낭비 후보</b></span>
         <span><i class="k-flow"></i><b data-en="white particles = named in the answer (evidence)">흰 입자 = 답변에 이름이 나온 근거</b></span>
-        <span class="k-tip" data-en="Click a region to zoom · a neuron for details · Space to replay">영역 이름을 누르면 확대 · 뉴런을 누르면 상세 · Space 재생</span>
+        <span class="k-tip" data-en="Click a region to zoom · a neuron for details · click the history strip to go back · ← → one call">영역 이름을 누르면 확대 · 뉴런을 누르면 상세 · 아래 띠를 누르면 그 시점 · ← → 한 호출씩</span>
       </div>
       <aside id="detail" class="overlay" hidden></aside>
       <div id="player" class="overlay">
-        <button id="play" type="button"></button>
-        <input id="scrub" type="range" min="0" max="0" value="0" aria-label="replay position">
-        <select id="speed" aria-label="replay speed"><option value="4">4×</option><option value="16" selected>16×</option><option value="64">64×</option></select>
-        <span id="play-time"></span>
+        <div class="pl-bar">
+          <span class="pl-title" data-en="Context history">컨텍스트 히스토리</span>
+          <span id="play-time"></span>
+          <button id="play" type="button"></button>
+          <select id="speed" aria-label="replay speed"><option value="4">4×</option><option value="16" selected>16×</option><option value="64">64×</option></select>
+          <button id="to-live" type="button" data-en="Now">지금으로</button>
+        </div>
+        <svg id="strip" role="img" aria-label="context size over the session"></svg>
       </div>
     </div>
   </section>

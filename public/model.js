@@ -377,5 +377,67 @@
     }
   }
 
-  return { squarify, splitSentences, needlesOf, findRefs, wasteCandidates, diagnose, describe, labelEn, projectReport, describeProject, shellProgramOf };
+  // ── 컨텍스트 히스토리 ─────────────────────────────────────
+  // API 호출(usage)마다 표본 하나: 실측 크기, 영역별 추정 크기, 직전 호출 뒤 새로 들어온 항목.
+  // 압축 때 빠지는 영역은 화면과 같은 규칙으로 비운다.
+  const DROPS_ON_COMPACT = new Set(['dialog', 'files', 'shell', 'web', 'agents', 'mcp', 'output']);
+  function contextSeries(events) {
+    const live = new Map();   // id → { lobe, tokens }
+    const samples = [];
+    const turns = [];
+    const compactions = [];
+    let pending = new Map();  // 직전 표본 뒤 들어온 항목 id → { id, label, lobe, tokens }
+    let turn = 0;
+    let last = null;
+    events.forEach((e, i) => {
+      if (e.kind === 'compact') {
+        for (const [id, x] of live) if (DROPS_ON_COMPACT.has(x.lobe)) live.delete(id);
+        compactions.push({ i, tokens: e.tokens || 0, at: samples.length });
+        return;
+      }
+      if (e.kind === 'usage') {
+        if (last != null && e.tokens === last) return; // 같은 응답이 여러 줄로 남은 것
+        last = e.tokens;
+        const lobes = {};
+        let est = 0;
+        for (const x of live.values()) { lobes[x.lobe] = (lobes[x.lobe] || 0) + x.tokens; est += x.tokens; }
+        const added = [...pending.values()].sort((a, b) => b.tokens - a.tokens);
+        samples.push({ i, t: e.t, turn, ctx: e.tokens, est, lobes, added: added.slice(0, 5),
+          addedTotal: added.reduce((a, x) => a + x.tokens, 0), delta: samples.length ? e.tokens - samples[samples.length - 1].ctx : 0 });
+        pending = new Map();
+        return;
+      }
+      if (!e.id || !e.lobe) return;
+      if (e.lobe === 'dialog' && e.kind === 'use' && !e.id.startsWith('dlg:summary')) {
+        turn++;
+        turns.push({ i, n: turn, label: e.label, at: samples.length });
+      }
+      if (!e.tokens) return;
+      const x = live.get(e.id) || { lobe: e.lobe, tokens: 0 };
+      const before = x.tokens;
+      x.tokens = e.kind === 'load' ? Math.max(x.tokens, e.tokens) : x.tokens + e.tokens;
+      live.set(e.id, x);
+      const grew = x.tokens - before;
+      if (grew > 0) {
+        const p = pending.get(e.id) || { id: e.id, label: e.label, lobe: e.lobe, tokens: 0 };
+        p.tokens += grew;
+        pending.set(e.id, p);
+      }
+    });
+    return { samples, turns, compactions };
+  }
+
+  // 가장 크게 불어난 지점들 (이름표를 달 후보). 서로 minGap 표본 이상 떨어진 것만
+  function growthSpikes(samples, n, minGap) {
+    const picked = [];
+    const order = samples.map((s, k) => ({ k, s })).filter((x) => x.s.delta > 0).sort((a, b) => b.s.delta - a.s.delta);
+    for (const x of order) {
+      if (picked.length >= (n || 4)) break;
+      if (picked.every((p) => Math.abs(p.k - x.k) >= (minGap || 3))) picked.push(x);
+    }
+    return picked.sort((a, b) => a.k - b.k);
+  }
+
+  return { squarify, splitSentences, needlesOf, findRefs, wasteCandidates, diagnose, describe, labelEn, projectReport, describeProject, shellProgramOf,
+    contextSeries, growthSpikes };
 });

@@ -461,6 +461,9 @@ const brain = (() => {
   function resize() {
     const [w, h] = size();
     camera.aspect = w / h;
+    // 아래쪽 히스토리 띠만큼 뇌를 위로 올려 띠에 가리지 않게 한다
+    const lift = Math.round(($('player').offsetHeight || 0) / 2);
+    camera.setViewOffset(w, h, 0, lift, w, h);
     camera.updateProjectionMatrix();
     renderer.setSize(w, h);
     composer.setSize(w, h);
@@ -583,8 +586,10 @@ const tip = $('tip');
 function showTip(ev, html) {
   tip.innerHTML = html;
   tip.style.left = Math.min(ev.clientX + 14, innerWidth - 330) + 'px';
-  tip.style.top = ev.clientY + 14 + 'px';
   tip.hidden = false;
+  // 화면 아래쪽(히스토리 띠)에서는 커서 위로 띄운다
+  const h = tip.offsetHeight;
+  tip.style.top = (ev.clientY + 14 + h > innerHeight ? Math.max(8, ev.clientY - h - 12) : ev.clientY + 14) + 'px';
 }
 function hideTip() { tip.hidden = true; }
 
@@ -956,6 +961,7 @@ function scheduleRender() {
     brain.refresh();
     renderTimeline();
     renderTurnLabel();
+    drawStrip();
     if (selected) renderDetail();
   }, 250);
 }
@@ -997,28 +1003,170 @@ function stopPlay() {
 }
 function renderPlayer() {
   const total = allEvents.length;
-  const sc = $('scrub');
-  sc.max = total;
-  sc.value = player.i;
-  $('play').textContent = player.on ? L('❚❚ 멈춤', '❚❚ Pause') : player.i >= total ? L('▶ 처음부터 재생', '▶ Replay from start') : L('▶ 이어서 재생', '▶ Resume');
-  const last = allEvents[player.i - 1];
-  const behind = total - player.i;
-  $('play-time').textContent = player.i >= total ? L('지금', 'live') : `${clock2(last && last.t)} · ${L(`턴 ${turns.length} · 남은 기록 ${behind}`, `turn ${turns.length} · ${behind} events left`)}`;
+  $('play').textContent = player.on ? L('❚❚ 멈춤', '❚❚ Pause') : player.i >= total ? L('▶ 처음부터 재생', '▶ Replay') : L('▶ 이어서 재생', '▶ Resume');
+  $('to-live').hidden = player.i >= total;
   $('player').classList.toggle('rewound', player.i < total);
+  const sm = sampleAt(player.i);
+  const s = series().samples;
+  $('play-time').textContent = player.i >= total
+    ? L(`지금 · API 호출 ${s.length}번 · 턴 ${turns.length}`, `now · ${s.length} API calls · ${turns.length} turns`)
+    : `${clock2(sm && sm.t)} · ${L(`턴 #${turns.length} · ${kfmt(sm ? sm.ctx : 0)} 토큰 · 되돌아본 시점`, `turn #${turns.length} · ${kfmt(sm ? sm.ctx : 0)} tokens · looking back`)}`;
+  drawStripCursor();
 }
 $('play').addEventListener('click', () => (player.on ? stopPlay() : startPlay()));
-let scrubFrame = 0;
-$('scrub').addEventListener('input', () => {
-  const k = Number($('scrub').value);  // stopPlay 가 막대를 현재 위치로 되돌리기 전에 읽는다
-  const was = player.on;
-  stopPlay();
-  $('scrub').value = k;
-  cancelAnimationFrame(scrubFrame);
-  scrubFrame = requestAnimationFrame(() => {
-    applyUpTo(k);
-    if (was) startPlay();
-  });
+$('to-live').addEventListener('click', () => { stopPlay(); applyUpTo(allEvents.length); });
+
+// ════════════════════════════════════════════════════════════
+// 컨텍스트 히스토리 띠: API 호출마다 영역별 크기를 쌓아 그린다.
+// 마우스를 올리면 그 호출 직전에 무엇이 들어왔는지, 누르면 뇌가 그 시점으로 돌아간다.
+// ════════════════════════════════════════════════════════════
+const STRIP_ORDER = ['system', 'rules', 'abilities', 'memory', 'skills', 'mcp', 'agents', 'web', 'files', 'shell', 'dialog', 'output'];
+let seriesCache = { n: -1, v: null };
+function series() {
+  if (seriesCache.n !== allEvents.length) seriesCache = { n: allEvents.length, v: window.CBModel.contextSeries(allEvents) };
+  return seriesCache.v;
+}
+// player.i 시점에 화면에 반영된 마지막 표본
+function sampleIndexAt(i) {
+  const s = series().samples;
+  let lo = -1;
+  for (let k = 0; k < s.length && s[k].i < i; k++) lo = k;
+  return lo;
+}
+const sampleAt = (i) => series().samples[sampleIndexAt(i)] || null;
+
+const strip = { w: 0, h: 84, top: 14, bottom: 14, x: null, key: '' };
+function drawStrip() {
+  const svg = $('strip');
+  const { samples, turns: tlist, compactions } = series();
+  const w = Math.max(100, svg.clientWidth);
+  const key = `${samples.length}:${w}:${compactAt}:${lang}`;
+  if (key === strip.key) { drawStripCursor(); return; }
+  strip.key = key;
+  strip.w = w;
+  svg.setAttribute('viewBox', `0 0 ${w} ${strip.h}`);
+  if (samples.length < 2) {
+    svg.innerHTML = `<text x="8" y="44">${L('API 호출이 두 번 이상 쌓이면 그려집니다', 'appears after two API calls')}</text>`;
+    return;
+  }
+  const n = samples.length;
+  const maxV = Math.max(...samples.map((x) => Math.max(x.ctx, x.est)), compactAt && compactAt < 1.6 * Math.max(...samples.map((x) => x.ctx)) ? compactAt : 0);
+  const plotH = strip.h - strip.top - strip.bottom;
+  const X = (k) => (k / (n - 1)) * (w - 2) + 1;
+  const Y = (v) => strip.top + plotH - (v / maxV) * plotH;
+  strip.x = X;
+  let html = '';
+  // 영역별 추정을 쌓은 띠
+  const base = new Array(n).fill(0);
+  for (const l of STRIP_ORDER) {
+    if (!samples.some((x) => x.lobes[l])) continue;
+    const upper = samples.map((x, k) => base[k] + (x.lobes[l] || 0));
+    const pts = upper.map((v, k) => `${X(k).toFixed(1)},${Y(v).toFixed(1)}`).join(' ');
+    const back = base.map((v, k) => `${X(k).toFixed(1)},${Y(v).toFixed(1)}`).reverse().join(' ');
+    html += `<polygon points="${pts} ${back}" fill="${hex(LOBE_META[l].color)}" fill-opacity="0.5"/>`;
+    upper.forEach((v, k) => (base[k] = v));
+  }
+  // 위쪽 글자들이 겹치지 않게 차지한 가로 구간을 기억한다
+  const taken = [];
+  const free = (x0, x1) => taken.every(([a, b]) => x1 < a - 6 || x0 > b + 6);
+  const textW = (str) => [...str].reduce((a, ch) => a + (ch.charCodeAt(0) > 255 ? 10 : 5.8), 0);
+  // 실측 크기 선, 압축 기준
+  html += `<polyline points="${samples.map((x, k) => `${X(k).toFixed(1)},${Y(x.ctx).toFixed(1)}`).join(' ')}" fill="none" stroke="#fff" stroke-width="1.4"/>`;
+  if (compactAt && compactAt <= maxV) {
+    html += `<line x1="0" x2="${w}" y1="${Y(compactAt)}" y2="${Y(compactAt)}" stroke="#ff8a8a" stroke-dasharray="4 4" stroke-opacity="0.7"/>
+      <text class="cmp" x="${w - 4}" y="${Y(compactAt) - 3}" text-anchor="end">${L('압축 기준', 'compaction point')} ${kfmt(compactAt)}</text>`;
+    const cw = textW(`${L('압축 기준', 'compaction point')} ${kfmt(compactAt)}`);
+    taken.push([w - 4 - cw, w]);
+  }
+  // 턴 경계: 번호가 겹치면 건너뛴다
+  let lastTick = -Infinity;
+  for (const t of tlist) {
+    const x = X(Math.min(n - 1, t.at));
+    html += `<line x1="${x}" x2="${x}" y1="${strip.top}" y2="${strip.h - strip.bottom}" stroke="#fff" stroke-opacity="0.08"/>`;
+    if (x - lastTick >= 30) { html += `<text class="tick" x="${x + 2}" y="${strip.h - 3}">#${t.n}</text>`; lastTick = x; }
+  }
+
+  // 압축 지점
+  for (const c of compactions) {
+    const x = X(Math.min(n - 1, c.at));
+    const label = `${L('압축', 'compacted')} ${kfmt(c.tokens)}`;
+    html += `<line x1="${x}" x2="${x}" y1="${strip.top - 4}" y2="${strip.h - strip.bottom}" stroke="#ff5a5a" stroke-width="2"/>
+      <text class="cmp" x="${x + 3}" y="10">${label}</text>`;
+    taken.push([x, x + 3 + textW(label)]);
+  }
+  // 가장 크게 불어난 지점에 이름표
+  for (const { k, s: x } of window.CBModel.growthSpikes(samples, Math.max(2, Math.floor(w / 220)), Math.ceil(n / 12))) {
+    const top = x.added[0];
+    const name = top && top.tokens > x.delta * 0.25 ? short(lang === 'en' ? labelEn(top.id, top.label) : top.label, 22) : L('응답 생성', 'response');
+    const label = `+${kfmt(x.delta)} ${name}`;
+    const lw = textW(label);
+    const anchor = X(k) + lw > w - 4 ? 'end' : 'start';
+    const x0 = anchor === 'end' ? X(k) - 4 - lw : X(k) + 4;
+    html += `<circle cx="${X(k)}" cy="${Y(x.ctx)}" r="2.5" fill="#fff"/>`;
+    if (!free(x0, x0 + lw)) continue;
+    taken.push([x0, x0 + lw]);
+    html += `<text class="spike" x="${anchor === 'end' ? X(k) - 4 : X(k) + 4}" y="${Math.max(10, Y(x.ctx) - 4)}" text-anchor="${anchor}">${escapeHtml(label)}</text>`;
+  }
+  html += `<rect id="strip-dim" y="0" height="${strip.h}" fill="#03050a" fill-opacity="0.6"/>
+    <line id="strip-cursor" y1="0" y2="${strip.h}" stroke="#7dd3ff" stroke-width="2"/>
+    <line id="strip-hover" y1="0" y2="${strip.h}" stroke="#fff" stroke-opacity="0.5" visibility="hidden"/>`;
+  svg.innerHTML = html;
+  drawStripCursor();
+}
+function drawStripCursor() {
+  const cur = $('strip-cursor');
+  if (!cur || !strip.x) return;
+  const n = series().samples.length;
+  const k = player.i >= allEvents.length ? n - 1 : Math.max(0, sampleIndexAt(player.i));
+  const x = strip.x(k);
+  cur.setAttribute('x1', x); cur.setAttribute('x2', x);
+  const dim = $('strip-dim');
+  dim.setAttribute('x', x); dim.setAttribute('width', Math.max(0, strip.w - x));
+}
+function stripSample(ev) {
+  const s = series().samples;
+  if (s.length < 2) return -1;
+  const r = $('strip').getBoundingClientRect();
+  return Math.max(0, Math.min(s.length - 1, Math.round(((ev.clientX - r.left) / r.width) * (s.length - 1))));
+}
+function stripTip(k) {
+  const x = series().samples[k];
+  const rows = x.added.map((a) => `<span><i class="dot" style="background:${hex(LOBE_META[a.lobe] ? LOBE_META[a.lobe].color : 0x888888)}"></i>${
+    escapeHtml(short(lang === 'en' ? labelEn(a.id, a.label) : a.label, 34))} <em>+${kfmt(a.tokens)}</em></span>`).join('');
+  const hidden = x.delta - x.addedTotal;
+  return `<b>${L(`턴 #${x.turn}`, `turn #${x.turn}`)} · ${clock2(x.t)} · ${kfmt(x.ctx)} ${L('토큰', 'tokens')}</b>
+    <span>${L('구성', 'made of')}: ${Object.entries(x.lobes).sort((a, b) => b[1] - a[1]).slice(0, 4).map(([l, v]) => `${lobeName(l)} ${kfmt(v)}`).join(' · ')}</span>
+    <span>${x.delta >= 0 ? '+' : ''}${kfmt(x.delta)} ${L('직전 호출 대비', 'since the previous call')}</span>${rows}
+    ${hidden > 500 ? `<span>${L(`+${kfmt(hidden)} 응답 생성 등 로그에 내용이 없는 증가`, `+${kfmt(hidden)} response generation and other growth the log has no content for`)}</span>` : ''}
+    <span>${L('누르면 뇌가 이 시점으로', 'click to see the brain at this point')}</span>`;
+}
+$('strip').addEventListener('mousemove', (ev) => {
+  const k = stripSample(ev);
+  if (k < 0) return;
+  const hv = $('strip-hover');
+  if (hv) { hv.setAttribute('x1', strip.x(k)); hv.setAttribute('x2', strip.x(k)); hv.setAttribute('visibility', 'visible'); }
+  showTip(ev, stripTip(k));
 });
+$('strip').addEventListener('mouseleave', () => { hideTip(); const hv = $('strip-hover'); if (hv) hv.setAttribute('visibility', 'hidden'); });
+$('strip').addEventListener('click', (ev) => {
+  const k = stripSample(ev);
+  if (k < 0) return;
+  stopPlay();
+  const s = series().samples;
+  applyUpTo(k === s.length - 1 ? allEvents.length : s[k].i + 1);
+});
+// ← → 로 API 호출 한 번씩 이동
+addEventListener('keydown', (ev) => {
+  if (ev.target.closest('input, select, textarea') || (ev.key !== 'ArrowLeft' && ev.key !== 'ArrowRight')) return;
+  const s = series().samples;
+  if (s.length < 2) return;
+  ev.preventDefault();
+  stopPlay();
+  const cur = player.i >= allEvents.length ? s.length - 1 : Math.max(0, sampleIndexAt(player.i));
+  const k = Math.max(0, Math.min(s.length - 1, cur + (ev.key === 'ArrowRight' ? 1 : -1)));
+  applyUpTo(k === s.length - 1 ? allEvents.length : s[k].i + 1);
+});
+new ResizeObserver(() => drawStrip()).observe($('strip'));
 
 // ════════════════════════════════════════════════════════════
 // 세션 연결
