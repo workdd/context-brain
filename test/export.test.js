@@ -81,3 +81,10 @@ describe('server listen', () => {
     await new Promise((r) => blocker.close(r));
   });
 });
+
+describe('demoSession', () => {
+  test('영어 데모에는 한글이 없다', () => {
+    const { boot, turns } = demoSession(0, 'en');
+    expect(JSON.stringify([boot, turns])).not.toMatch(/[가-힣]/);
+  });
+});

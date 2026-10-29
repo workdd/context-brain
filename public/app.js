@@ -7,6 +7,7 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 
 const { squarify, splitSentences, findRefs, wasteCandidates } = window.CBModel;
+const { L, lang } = window.CBLang;
 
 // ════════════════════════════════════════════════════════════
 // 공통
@@ -33,7 +34,7 @@ const lobeNames = Object.keys(LOBE_META);
 const COMPACTABLE = new Set(['dialog', 'files', 'shell', 'web', 'agents', 'mcp', 'output']);
 // 턴마다 새로 쓰지 않아도 늘 실려 있는 영역
 const STANDING = ['rules', 'system', 'abilities', 'memory'];
-const KIND_LABEL = { use: '사용', result: '결과', load: '로드', ref: '언급' };
+const KIND_LABEL = L({ use: '사용', result: '결과', load: '로드', ref: '언급' }, { use: 'used', result: 'result', load: 'loaded', ref: 'named' });
 const KIND_WEIGHT = { use: 1.0, result: 0.8, load: 0.6, ref: 0.9 };
 const HISTORY_MAX = 40;
 const ANSWER_LINES = 8;
@@ -41,13 +42,28 @@ const LABEL_TOP = 8;      // 늘 이름표를 붙이는 큰 항목 수
 const LABEL_TURN = 12;    // 보고 있는 턴에서 이름표를 붙이는 항목 수
 const FLOW_MAX = 30;      // 보고 있는 턴에서 그리는 빛줄기 수
 let LOBE_NAMES = {};
+const LOBE_EN = { rules: 'Rules (CLAUDE.md)', system: 'System prompt', memory: 'Memory (hooks)', abilities: 'Tool list', dialog: 'Dialog',
+  files: 'Files', shell: 'Shell', web: 'Web', agents: 'Subagents', skills: 'Skills', mcp: 'MCP', output: 'Response' };
+// 파서가 붙이는 고정 이름 · 설명 (한국어) 의 영어
+const LABEL_EN = { 'sys:prompt': 'System prompt', 'abil:skills': 'Skill list', 'abil:agents': 'Agent list', 'abil:deferred': 'Deferred tool names',
+  'out:thinking': 'Thinking', 'out:answer': 'Answer', 'web:search': 'Web search' };
+const DETAIL_EN = { '스키마 로드': 'schema loaded', '스킬 본문 로드': 'skill body loaded', '답변에서 언급': 'named in the answer' };
+function labelOf(e) {
+  if (lang !== 'en' || !e.label) return e.label;
+  if (LABEL_EN[e.id]) return LABEL_EN[e.id];
+  if (e.id.startsWith('dlg:summary')) return 'Compaction summary';
+  if (e.id.startsWith('abil:mcp:')) return e.label.replace(/ 안내$/, ' instructions');
+  if (/^입력 #\d+$/.test(e.label)) return e.label.replace('입력', 'Prompt');
+  return e.label === '(입력)' ? '(prompt)' : e.label;
+}
+const detailOf = (d) => (lang === 'en' && DETAIL_EN[d]) || d;
 
 const $ = (id) => document.getElementById(id);
 const hex = (c) => '#' + new THREE.Color(c).getHexString();
-const fmt = (n) => Math.round(n || 0).toLocaleString('ko-KR');
+const fmt = (n) => Math.round(n || 0).toLocaleString(L('ko-KR', 'en-US'));
 const kfmt = (n) => (n >= 1000 ? (n / 1000).toFixed(n >= 100000 ? 0 : 1) + 'k' : String(Math.round(n || 0)));
 const clock2 = (t) => (t ? new Date(t).toLocaleTimeString('en-GB') : '');
-const lobeName = (l) => LOBE_NAMES[l] || l;
+const lobeName = (l) => L(LOBE_NAMES[l] || l, LOBE_EN[l] || l);
 const short = (s, n = 26) => (s.length > n ? s.slice(0, n - 1) + '…' : s);
 function escapeHtml(s) {
   return String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -89,7 +105,7 @@ const vt = () => viewTurn || turns.length;
 function getNeuron(e) {
   let n = neurons.get(e.id);
   if (n) return n;
-  n = { id: e.id, lobe: e.lobe, label: e.label, act: 0, tokens: 0, counts: {}, compacted: false,
+  n = { id: e.id, lobe: e.lobe, label: labelOf(e), act: 0, tokens: 0, counts: {}, compacted: false,
     history: [], turns: new Set(), lastTurn: 0, mesh: null, tag: null };
   neurons.set(e.id, n);
   brain.addNeuron(n);
@@ -97,7 +113,7 @@ function getNeuron(e) {
 }
 
 function startTurn(e) {
-  turns.push({ n: turns.length + 1, prompt: e.label, t: e.t, steps: [], answers: [], items: new Map(), added: 0, done: false, ms: 0, ctxEnd: null });
+  turns.push({ n: turns.length + 1, prompt: labelOf(e), t: e.t, steps: [], answers: [], items: new Map(), added: 0, done: false, ms: 0, ctxEnd: null });
 }
 
 function trackTurn(e, n) {
@@ -146,7 +162,7 @@ function applyEvent(e, live) {
   if (!LOBE_META[e.lobe]) return;
   if (e.lobe === 'dialog' && e.kind === 'use' && !e.id.startsWith('dlg:summary')) startTurn(e);
   const n = getNeuron(e);
-  n.label = e.label || n.label;
+  n.label = labelOf(e) || n.label;
   n.counts[e.kind] = (n.counts[e.kind] || 0) + 1;
   if (n.compacted && e.kind !== 'ref') { n.compacted = false; n.tokens = 0; } // 압축 뒤 다시 들어온 것은 새로 센다
   if (e.tokens) n.tokens = e.kind === 'load' ? Math.max(n.tokens, e.tokens) : n.tokens + e.tokens;
@@ -447,7 +463,7 @@ const brain = (() => {
   renderer.domElement.addEventListener('pointermove', (ev) => {
     const n = pick(ev);
     renderer.domElement.style.cursor = n ? 'pointer' : '';
-    if (n) showTip(ev, `<b>${lobeName(n.lobe)}: ${escapeHtml(n.label)}</b><span>약 ${fmt(n.tokens)} 토큰${n.compacted ? ' · 압축으로 빠짐' : ''}${wasteIds.has(n.id) ? ' · 낭비 후보' : ''}</span><span>클릭하면 자세히</span>`);
+    if (n) showTip(ev, `<b>${lobeName(n.lobe)}: ${escapeHtml(n.label)}</b><span>${L(`약 ${fmt(n.tokens)} 토큰`, `~${fmt(n.tokens)} tokens`)}${n.compacted ? L(' · 압축으로 빠짐', ' · dropped by compaction') : ''}${wasteIds.has(n.id) ? L(' · 낭비 후보', ' · likely dead weight') : ''}</span><span>${L('클릭하면 자세히', 'click for details')}</span>`);
     else hideTip();
   });
   renderer.domElement.addEventListener('pointerleave', hideTip);
@@ -560,7 +576,7 @@ $('turn-next').addEventListener('click', () => setViewTurn(vt() + 1));
 $('brain-size').addEventListener('click', () => {
   const big = $('brainbox').classList.toggle('big');
   document.body.classList.toggle('brain-big', big);
-  $('brain-size').textContent = big ? '작게 (Esc)' : '크게';
+  $('brain-size').textContent = big ? L('작게 (Esc)', 'Smaller (Esc)') : L('크게', 'Bigger');
 });
 addEventListener('keydown', (ev) => {
   if (ev.key === 'Escape' && $('brainbox').classList.contains('big')) $('brain-size').click();
@@ -624,7 +640,7 @@ document.addEventListener('mouseover', (ev) => {
 // ════════════════════════════════════════════════════════════
 function renderRing(now) {
   const box = $('ring');
-  if (now == null) { box.innerHTML = '<span>컨텍스트 기록 없음</span>'; return; }
+  if (now == null) { box.innerHTML = `<span>${L('컨텍스트 기록 없음', 'no context yet')}</span>`; return; }
   const r = compactAt ? Math.min(1, now / compactAt) : 0;
   const color = r > 0.85 ? '#ff8a8a' : r > 0.65 ? '#ffc76b' : '#9be7a8';
   const C = 2 * Math.PI * 17;
@@ -633,23 +649,24 @@ function renderRing(now) {
       ${compactAt ? `<circle cx="22" cy="22" r="17" fill="none" stroke="${color}" stroke-width="5" stroke-linecap="round"
         stroke-dasharray="${(C * r).toFixed(1)} ${C.toFixed(1)}" transform="rotate(-90 22 22)"/>` : ''}
       <text x="22" y="26" text-anchor="middle" font-size="11" fill="#e3e9f5">${compactAt ? Math.round(r * 100) + '%' : '?'}</text></svg>
-    <div><b>${kfmt(now)} 토큰</b>${compactAt ? `압축까지 약 ${kfmt(Math.max(0, compactAt - now))}` : '압축 기준 미관측'}</div>`;
+    <div><b>${kfmt(now)} ${L('토큰', 'tokens')}</b>${compactAt ? L(`압축까지 약 ${kfmt(Math.max(0, compactAt - now))}`, `~${kfmt(Math.max(0, compactAt - now))} until compaction`) : L('압축 기준 미관측', 'compaction point unknown')}</div>`;
 }
 
 function renderBudget() {
   const now = ctxHistory[ctxHistory.length - 1];
   renderRing(now);
-  $('ctx').textContent = now != null ? `${fmt(now)} 토큰` : '-';
+  $('ctx').textContent = now != null ? `${fmt(now)} ${L('토큰', 'tokens')}` : '-';
   const fill = $('gauge-fill');
   const note = $('gauge-note');
   if (now != null && compactAt) {
     const r = Math.min(1, now / compactAt);
     fill.style.width = (r * 100).toFixed(1) + '%';
     fill.style.background = r > 0.85 ? 'var(--bad)' : r > 0.65 ? 'var(--warn)' : 'var(--good)';
-    note.innerHTML = `압축 기준 약 <b>${kfmt(compactAt)}</b> (최근 세션에서 실제 압축이 일어난 크기) · 남은 양 약 <b>${kfmt(Math.max(0, compactAt - now))}</b> · ${Math.round(r * 100)}%`;
+    note.innerHTML = L(`압축 기준 약 <b>${kfmt(compactAt)}</b> (최근 세션에서 실제 압축이 일어난 크기) · 남은 양 약 <b>${kfmt(Math.max(0, compactAt - now))}</b>`,
+      `Compaction at ~<b>${kfmt(compactAt)}</b> (where recent sessions actually compacted) · ~<b>${kfmt(Math.max(0, compactAt - now))}</b> left`) + ` · ${Math.round(r * 100)}%`;
   } else {
     fill.style.width = '0';
-    note.textContent = now == null ? '아직 API 사용량 기록이 없습니다' : '최근 세션에서 압축이 일어난 적이 없어 압축 기준을 모릅니다';
+    note.textContent = now == null ? L('아직 API 사용량 기록이 없습니다', 'no API usage recorded yet') : L('최근 세션에서 압축이 일어난 적이 없어 압축 기준을 모릅니다', 'no recent session has compacted, so the compaction point is unknown');
   }
   drawSpark();
 
@@ -661,7 +678,8 @@ function renderBudget() {
     .map((g) => ({ ...g, value: g.items.reduce((s, n) => s + n.tokens, 0) })).filter((g) => g.value > 0);
   const est = groups.reduce((s, g) => s + g.value, 0);
   $('map-note').textContent = now
-    ? `추정 합계 ${kfmt(est)} / 실측 ${kfmt(now)}${now > est ? ` · 차이 ${kfmt(now - est)}는 도구 정의, 대화 틀, 한글 과소 추정처럼 로그로 셀 수 없는 부분` : ''}`
+    ? L(`추정 합계 ${kfmt(est)} / 실측 ${kfmt(now)}${now > est ? ` · 차이 ${kfmt(now - est)}는 도구 정의, 대화 틀, 한글 과소 추정처럼 로그로 셀 수 없는 부분` : ''}`,
+      `estimated ${kfmt(est)} / measured ${kfmt(now)}${now > est ? ` · the ${kfmt(now - est)} gap is what the log cannot see (tool definitions, message framing, under-counted non-English text)` : ''}`)
     : '';
   const box = $('treemap');
   const W = box.clientWidth, H = box.clientHeight;
@@ -682,19 +700,19 @@ function renderBudget() {
         const cls = [wasteIds.has(it.n.id) ? 'waste' : '', STANDING.includes(G.lobe) || it.n.turns.has(vt()) ? '' : 'old'].join(' ');
         html += tileHtml(c, cls, it.n.id, `${lobeName(G.lobe)}: ${it.n.label}`, kfmt(it.n.tokens), color);
       } else {
-        html += tileHtml(c, 'old', null, `${lobeName(G.lobe)}: 그 밖 ${it.rest}개`, kfmt(it.value), color);
+        html += tileHtml(c, 'old', null, `${lobeName(G.lobe)}: ${L(`그 밖 ${it.rest}개`, `${it.rest} more`)}`, kfmt(it.value), color);
       }
     }
   }
-  box.innerHTML = html || '<div class="empty" style="padding:12px">아직 컨텍스트 항목이 없습니다</div>';
+  box.innerHTML = html || `<div class="empty" style="padding:12px">${L('아직 컨텍스트 항목이 없습니다', 'no context items yet')}</div>`;
 
   const wbox = $('waste');
   const wsum = waste.reduce((s, n) => s + n.tokens, 0);
-  wbox.innerHTML = `<h3>낭비 후보 ${waste.length ? `· 약 ${kfmt(wsum)} 토큰` : ''}</h3>
-    <div class="why">800토큰 이상 들어왔는데 마지막으로 쓰인 뒤 2턴 넘게 다시 쓰이지 않은 항목. 뇌에서 붉게 숨쉬는 뉴런</div>
+  wbox.innerHTML = `<h3>${L('낭비 후보', 'Likely dead weight')} ${waste.length ? L(`· 약 ${kfmt(wsum)} 토큰`, `· ~${kfmt(wsum)} tokens`) : ''}</h3>
+    <div class="why">${L('800토큰 이상 들어왔는데 마지막으로 쓰인 뒤 2턴 넘게 다시 쓰이지 않은 항목. 뇌에서 붉게 숨쉬는 뉴런', 'Items of 800+ tokens not used again for more than 2 turns. The red pulsing neurons in the brain')}</div>
     ${waste.length ? `<ol>${waste.map((n) => `<li data-id="${escapeHtml(n.id)}"><i class="dot" style="background:${hex(LOBE_META[n.lobe].color)}"></i>
-      <span>${lobeName(n.lobe)}: ${escapeHtml(n.label)}</span><em>${kfmt(n.tokens)} · #${n.lastTurn} 이후</em></li>`).join('')}</ol>`
-      : '<div class="none">없음</div>'}`;
+      <span>${lobeName(n.lobe)}: ${escapeHtml(n.label)}</span><em>${kfmt(n.tokens)} · ${L(`#${n.lastTurn} 이후`, `since #${n.lastTurn}`)}</em></li>`).join('')}</ol>`
+      : `<div class="none">${L('없음', 'none')}</div>`}`;
 }
 
 function tileHtml(r, cls, id, name, val, color) {
@@ -758,8 +776,8 @@ function turnHtml(tr) {
   const byLobe = {};
   for (const it of items) byLobe[it.n.lobe] = (byLobe[it.n.lobe] || 0) + 1;
   const sum = lobeNames.filter((l) => byLobe[l]).map((l) => `<span><i class="dot" style="background:${hex(LOBE_META[l].color)}"></i> ${lobeName(l)} ${byLobe[l]}</span>`).join('');
-  const state = tr.done ? `<span class="state done">완료 ${(tr.ms / 1000).toFixed(1)}초</span>`
-    : tr.n === turns.length ? '<span class="state live">진행 중</span>' : '<span class="state">기록 없음</span>';
+  const state = tr.done ? `<span class="state done">${L(`완료 ${(tr.ms / 1000).toFixed(1)}초`, `done in ${(tr.ms / 1000).toFixed(1)}s`)}</span>`
+    : tr.n === turns.length ? `<span class="state live">${L('진행 중', 'running')}</span>` : `<span class="state">${L('기록 없음', 'no record')}</span>`;
   const viewing = vt() === tr.n;
   let body = '';
   if (isOpen(tr.n)) {
@@ -775,34 +793,34 @@ function turnHtml(tr) {
     const hits = rows.filter((r) => r.refs.length).length;
     const answer = rows.length ? `<ul class="answer">${shown.map((r) => `<li class="${r.refs.length ? 'hit' : ''}"><span class="s">${escapeHtml(r.s)}</span>
         ${r.refs.length ? `<span class="refs">${r.refs.map((id) => chip(neurons.get(id))).join('')}</span>` : ''}</li>`).join('')}</ul>
-      ${rows.length > ANSWER_LINES ? `<button class="more" data-more="${tr.n}">${all ? '접기' : `전체 ${rows.length}문장 보기`}</button>` : ''}`
-      : '<div class="empty">아직 답변이 없습니다</div>';
+      ${rows.length > ANSWER_LINES ? `<button class="more" data-more="${tr.n}">${all ? L('접기', 'collapse') : L(`전체 ${rows.length}문장 보기`, `show all ${rows.length} sentences`)}</button>` : ''}`
+      : `<div class="empty">${L('아직 답변이 없습니다', 'no answer yet')}</div>`;
     const standing = STANDING.map((l) => {
       let c = 0, t = 0;
       for (const n of neurons.values()) if (n.lobe === l && !n.compacted) { c++; t += n.tokens; }
-      return c ? `<span class="chip"><i class="dot" style="background:${hex(LOBE_META[l].color)}"></i>${lobeName(l)} ${c}개 <em>${kfmt(t)}</em></span>` : '';
+      return c ? `<span class="chip"><i class="dot" style="background:${hex(LOBE_META[l].color)}"></i>${lobeName(l)} ${L(`${c}개`, `×${c}`)} <em>${kfmt(t)}</em></span>` : '';
     }).join('');
     body = `<div class="turn-body">
-      <div class="sec"><div class="sec-label">흐름 (도구 호출 순서 · 숫자 = 결과로 들어온 토큰)</div>
-        <div class="flow">${flow || '<span class="empty">도구를 쓰지 않았습니다</span>'}</div></div>
-      <div class="sec"><div class="sec-label">답변과 근거 ${rows.length ? `· ${rows.length}문장 중 ${hits}문장에 근거 이름이 나옴` : ''}</div>${answer}</div>
-      <div class="sec"><div class="sec-label">늘 실려 있던 것</div><div class="flow">${standing}</div></div>
-      <div class="sec">${viewing ? '<span class="empty">위 뇌가 이 턴을 보여 주고 있습니다</span>' : `<button class="btn" data-view="${tr.n}">이 턴을 뇌에서 보기</button>`}</div>
+      <div class="sec"><div class="sec-label">${L('흐름 (도구 호출 순서 · 숫자 = 결과로 들어온 토큰)', 'Flow (tool calls in order · number = tokens returned)')}</div>
+        <div class="flow">${flow || `<span class="empty">${L('도구를 쓰지 않았습니다', 'no tools used')}</span>`}</div></div>
+      <div class="sec"><div class="sec-label">${L('답변과 근거', 'Answer and evidence')} ${rows.length ? L(`· ${rows.length}문장 중 ${hits}문장에 근거 이름이 나옴`, `· ${hits} of ${rows.length} sentences name a source`) : ''}</div>${answer}</div>
+      <div class="sec"><div class="sec-label">${L('늘 실려 있던 것', 'Always loaded')}</div><div class="flow">${standing}</div></div>
+      <div class="sec">${viewing ? `<span class="empty">${L('위 뇌가 이 턴을 보여 주고 있습니다', 'the brain above is showing this turn')}</span>` : `<button class="btn" data-view="${tr.n}">${L('이 턴을 뇌에서 보기', 'Show this turn in the brain')}</button>`}</div>
     </div>`;
   }
   return `<li class="turn ${viewing ? 'viewing' : ''}">
     <div class="turn-head" data-turn="${tr.n}">${miniBrain(tr)}
-      <div class="turn-title"><span class="prompt"><span class="no">#${tr.n}</span>${escapeHtml(tr.prompt)}</span><span class="sum">${sum || '도구 사용 없음'}</span></div>
-      <div class="turn-meta">${state}<br>${clock2(tr.t)} · +${kfmt(tr.added)}${tr.ctxEnd ? ` · 컨텍스트 ${kfmt(tr.ctxEnd)}` : ''}</div>
+      <div class="turn-title"><span class="prompt"><span class="no">#${tr.n}</span>${escapeHtml(tr.prompt)}</span><span class="sum">${sum || L('도구 사용 없음', 'no tools')}</span></div>
+      <div class="turn-meta">${state}<br>${clock2(tr.t)} · +${kfmt(tr.added)}${tr.ctxEnd ? ` · ${L('컨텍스트', 'context')} ${kfmt(tr.ctxEnd)}` : ''}</div>
     </div>${body}</li>`;
 }
 
 function renderTimeline() {
-  if (!turns.length) { $('turns').innerHTML = '<li class="empty">아직 사용자 입력이 없습니다</li>'; return; }
+  if (!turns.length) { $('turns').innerHTML = `<li class="empty">${L('아직 사용자 입력이 없습니다', 'no prompts yet')}</li>`; return; }
   let html = '';
   for (let i = turns.length - 1; i >= 0; i--) {
     for (const c of compactions.filter((x) => x.afterTurn === i + 1)) {
-      html += `<li class="compact-row">압축 · 직전 ${fmt(c.tokens)} 토큰. 이 아래 턴들의 파일 · 셸 · 웹 결과는 컨텍스트에서 빠졌습니다</li>`;
+      html += `<li class="compact-row">${L(`압축 · 직전 ${fmt(c.tokens)} 토큰. 이 아래 턴들의 파일 · 셸 · 웹 결과는 컨텍스트에서 빠졌습니다`, `Compaction at ${fmt(c.tokens)} tokens. File, shell and web results from the turns below left the context`)}</li>`;
     }
     html += turnHtml(turns[i]);
   }
@@ -811,7 +829,7 @@ function renderTimeline() {
 
 function renderTurnLabel() {
   const no = vt();
-  $('turn-label').textContent = turns.length ? (viewTurn ? `턴 #${no} / ${turns.length}` : `지금 턴 #${no}`) : '턴 없음';
+  $('turn-label').textContent = turns.length ? (viewTurn ? L(`턴 #${no} / ${turns.length}`, `turn #${no} / ${turns.length}`) : L(`지금 턴 #${no}`, `now: turn #${no}`)) : L('턴 없음', 'no turns');
   $('turn-prev').disabled = no <= 1;
   $('turn-next').disabled = !viewTurn;
 }
@@ -827,23 +845,23 @@ function renderDetail() {
     const list = [...neurons.values()].filter((n) => n.lobe === l).sort((a, b) => (a.compacted - b.compacted) || (b.tokens - a.tokens));
     const total = list.filter((n) => !n.compacted).reduce((s, n) => s + n.tokens, 0);
     box.innerHTML = `<button class="close" aria-label="닫기">×</button>
-      <div class="d-lobe" style="color:${hex(LOBE_META[l].color)}">영역</div>
+      <div class="d-lobe" style="color:${hex(LOBE_META[l].color)}">${L('영역', 'Region')}</div>
       <h3>${lobeName(l)}</h3>
-      <div class="d-stats">${list.length}개 · 컨텍스트에 남은 양 약 ${fmt(total)} 토큰</div>
+      <div class="d-stats">${L(`${list.length}개 · 컨텍스트에 남은 양 약 ${fmt(total)} 토큰`, `${list.length} items · ~${fmt(total)} tokens still in context`)}</div>
       <ol class="l-items">${list.map((n) => `<li data-id="${escapeHtml(n.id)}" class="${n.compacted ? 'off' : ''} ${wasteIds.has(n.id) ? 'waste' : ''}">
-        <span>${escapeHtml(n.label)}</span><em>${n.compacted ? '압축됨' : kfmt(n.tokens)}${n.lastTurn ? ` · #${n.lastTurn}` : ''}</em></li>`).join('') || '<li>항목 없음</li>'}</ol>`;
+        <span>${escapeHtml(n.label)}</span><em>${n.compacted ? L('압축됨', 'compacted') : kfmt(n.tokens)}${n.lastTurn ? ` · #${n.lastTurn}` : ''}</em></li>`).join('') || `<li>${L('항목 없음', 'no items')}</li>`}</ol>`;
   } else {
     const n = selected.n;
-    const counts = Object.entries(n.counts).map(([k, v]) => `${KIND_LABEL[k] || k} ${v}회`).join(' · ');
+    const counts = Object.entries(n.counts).map(([k, v]) => L(`${KIND_LABEL[k] || k} ${v}회`, `${KIND_LABEL[k] || k} ×${v}`)).join(' · ');
     const rows = n.history.slice().reverse().map((e) => `<li><div class="d-head"><span class="kind">${KIND_LABEL[e.kind] || e.kind}</span>${clock2(e.t)}
-        ${e.tokens ? ` · 약 ${fmt(e.tokens)} 토큰` : ''}${e.error ? ' · <b class="err">오류</b>' : ''}${e.tool ? ' · ' + e.tool : ''}</div>
-        ${e.input ? `<pre>${escapeHtml(e.input)}</pre>` : e.detail ? `<div class="d-note">${escapeHtml(e.detail)}</div>` : ''}
+        ${e.tokens ? L(` · 약 ${fmt(e.tokens)} 토큰`, ` · ~${fmt(e.tokens)} tokens`) : ''}${e.error ? ` · <b class="err">${L('오류', 'error')}</b>` : ''}${e.tool ? ' · ' + e.tool : ''}</div>
+        ${e.input ? `<pre>${escapeHtml(e.input)}</pre>` : e.detail ? `<div class="d-note">${escapeHtml(detailOf(e.detail))}</div>` : ''}
         ${e.preview ? `<pre class="out">${escapeHtml(e.preview)}</pre>` : ''}</li>`).join('');
     const usedIn = [...n.turns].sort((a, b) => a - b).map((t) => '#' + t).join(' ');
     box.innerHTML = `<button class="close" aria-label="닫기">×</button>
       <div class="d-lobe" style="color:${hex(LOBE_META[n.lobe].color)}">${lobeName(n.lobe)}</div>
       <h3>${escapeHtml(n.label)}</h3>
-      <div class="d-stats">${counts} · 약 ${fmt(n.tokens)} 토큰${n.compacted ? ' · 압축으로 컨텍스트에서 빠짐' : ''}${wasteIds.has(n.id) ? ' · 낭비 후보' : ''}${usedIn ? ` · 쓰인 턴 ${usedIn}` : ''}</div>
+      <div class="d-stats">${counts} · ${L(`약 ${fmt(n.tokens)} 토큰`, `~${fmt(n.tokens)} tokens`)}${n.compacted ? L(' · 압축으로 컨텍스트에서 빠짐', ' · dropped from context by compaction') : ''}${wasteIds.has(n.id) ? L(' · 낭비 후보', ' · likely dead weight') : ''}${usedIn ? ` · ${L('쓰인 턴', 'used in turns')} ${usedIn}` : ''}</div>
       <ol class="d-list">${rows}</ol>`;
   }
   box.querySelector('.close').addEventListener('click', () => { selected = null; renderDetail(); });
@@ -904,10 +922,10 @@ function renderPlayer() {
   const sc = $('scrub');
   sc.max = total;
   sc.value = player.i;
-  $('play').textContent = player.on ? '❚❚ 멈춤' : player.i >= total ? '▶ 처음부터 재생' : '▶ 이어서 재생';
+  $('play').textContent = player.on ? L('❚❚ 멈춤', '❚❚ Pause') : player.i >= total ? L('▶ 처음부터 재생', '▶ Replay from start') : L('▶ 이어서 재생', '▶ Resume');
   const last = allEvents[player.i - 1];
   const behind = total - player.i;
-  $('play-time').textContent = player.i >= total ? '지금' : `${clock2(last && last.t)} · 턴 ${turns.length} · 남은 기록 ${behind}`;
+  $('play-time').textContent = player.i >= total ? L('지금', 'live') : `${clock2(last && last.t)} · ${L(`턴 ${turns.length} · 남은 기록 ${behind}`, `turn ${turns.length} · ${behind} events left`)}`;
   $('player').classList.toggle('rewound', player.i < total);
 }
 $('play').addEventListener('click', () => (player.on ? stopPlay() : startPlay()));
@@ -945,7 +963,7 @@ function reset() {
 
 function connect(file) {
   if (source) source.close();
-  $('status').textContent = '연결 중…';
+  $('status').textContent = L('연결 중…', 'connecting…');
   source = new EventSource('/api/stream?file=' + encodeURIComponent(file || 'latest'));
   source.addEventListener('replay', (m) => {
     const data = JSON.parse(m.data);
@@ -956,7 +974,7 @@ function connect(file) {
     stopPlay();
     allEvents = data.events;
     applyUpTo(allEvents.length);
-    $('status').textContent = `기록 ${data.events.length}개 불러옴`;
+    $('status').textContent = L(`기록 ${data.events.length}개 불러옴`, `${data.events.length} events loaded`);
   });
   source.addEventListener('events', (m) => {
     const head = atHead();
@@ -964,11 +982,11 @@ function connect(file) {
     if (head) {
       for (; player.i < allEvents.length; player.i++) applyEvent(allEvents[player.i], true);
       scheduleRender();
-      $('status').textContent = `실시간 · ${clock2(Date.now())}`;
-    } else $('status').textContent = '재생 중 · 새 기록은 재생이 끝나면 이어서 반영';
+      $('status').textContent = `${L('실시간', 'live')} · ${clock2(Date.now())}`;
+    } else $('status').textContent = L('재생 중 · 새 기록은 재생이 끝나면 이어서 반영', 'replaying · new events will follow when the replay ends');
     renderPlayer();
   });
-  source.onerror = () => { $('status').textContent = '연결 끊김 · 다시 시도 중'; };
+  source.onerror = () => { $('status').textContent = L('연결 끊김 · 다시 시도 중', 'disconnected · retrying'); };
 }
 
 async function refreshSessions() {
@@ -981,7 +999,7 @@ async function refreshSessions() {
     o.value = s.file;
     const ago = Math.round((Date.now() - s.mtime) / 60000);
     const proj = s.project.replace(/^-Users-[^-]+-/, '').slice(-28);
-    o.textContent = `${s.title || s.file.split('/').pop().slice(0, 8)} · ${proj} · ${ago < 1 ? '방금' : ago + '분 전'}`;
+    o.textContent = `${s.title || s.file.split('/').pop().slice(0, 8)} · ${proj} · ${ago < 1 ? L('방금', 'just now') : L(ago + '분 전', ago + ' min ago')}`;
     sel.appendChild(o);
   }
   sel.value = currentFile || keep;
@@ -996,6 +1014,12 @@ $('export').addEventListener('click', () => {
   location.href = '/api/export?file=' + encodeURIComponent(currentFile) + ($('redact').checked ? '&redact=1' : '');
 });
 
+window.CBLang.apply();
+$('brain-size').textContent = L('크게', 'Bigger');
+$('lang').textContent = L('English', '한국어');
+$('lang').addEventListener('click', () => window.CBLang.set(L('en', 'ko')));
+renderPlayer();
+
 // 공유된 HTML 은 기록을 품고 있다. 서버 없이 처음부터 재생한다
 const embedded = $('cb-data');
 if (embedded) {
@@ -1003,8 +1027,9 @@ if (embedded) {
   document.body.classList.add('static');
   LOBE_NAMES = d.lobes || {};
   compactAt = d.compactAt || null;
-  allEvents = d.events || [];
-  $('status').textContent = d.title ? `공유된 세션 · ${d.title}` : '공유된 세션';
+  allEvents = (d.variants && d.variants[lang]) || d.events || [];
+  const title = (d.titles && d.titles[lang]) || d.title;
+  $('status').textContent = title ? `${L('공유된 세션', 'Shared session')} · ${title}` : L('공유된 세션', 'Shared session');
   if (d.autoplay) { applyUpTo(0); setTimeout(startPlay, 800); } else applyUpTo(allEvents.length);
 } else {
   fetch('/api/limits').then((r) => r.json()).then((l) => { compactAt = l.compactAt; scheduleRender(); }).catch(() => {});

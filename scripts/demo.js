@@ -18,7 +18,8 @@ fs.writeFileSync(old, JSON.stringify({ type: 'system', subtype: 'compact_boundar
 const past = new Date(Date.now() - 86400000);
 fs.utimesSync(old, past, past);
 
-const { boot, turns } = require('../lib/demo').demoSession();
+const lang = process.env.CB_LANG || (Intl.DateTimeFormat().resolvedOptions().locale.startsWith('ko') ? 'ko' : 'en');
+const { boot, turns } = require('../lib/demo').demoSession(undefined, lang);
 
 const live = !process.argv.includes('--static');
 const write = (entries, now = false) => fs.appendFileSync(file, entries

@@ -189,9 +189,10 @@ body.brain-big #top { z-index: 0; }
 #scrub { flex: 1; min-width: 60px; accent-color: #7dd3ff; }
 #play-time { min-width: 120px; text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .export-box { display: flex; align-items: center; gap: 8px; margin-left: auto; }
-.repo { color: var(--dim); font-size: 12px; text-decoration: none; border: 1px solid var(--line); border-radius: 6px; padding: 2px 9px; }
+.repo { background: transparent; cursor: pointer; font: inherit; color: var(--dim); font-size: 12px; text-decoration: none; border: 1px solid var(--line); border-radius: 6px; padding: 2px 9px; }
 .repo:hover { color: var(--text); }
 body.static #session, body.static #top > .check, body.static .export-box { display: none; }
-body.static .repo { margin-left: auto; }
+body.static #lang { margin-left: auto; }
 @media (max-width: 1100px) { #key { display: none; } }
 @media (max-width: 640px) { .export-box { display: none; } #play-time { display: none; } }
+#key b { font-weight: 400; }

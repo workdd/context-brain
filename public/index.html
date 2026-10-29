@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Context Brain</title>
 <link rel="stylesheet" href="style.css">
+<script src="i18n.js"></script>
 <script src="model.js"></script>
 <script type="importmap">
 {
@@ -17,49 +18,50 @@
 </head>
 <body>
 <header id="top">
-  <div class="brand"><h1>Context Brain</h1><span>Claude Code 컨텍스트 관찰</span></div>
+  <div class="brand"><h1>Context Brain</h1><span data-en="Watch what Claude Code is holding in context">Claude Code 컨텍스트 관찰</span></div>
   <select id="session" aria-label="세션"></select>
-  <label class="check"><input type="checkbox" id="follow" checked> 최근 세션 따라가기</label>
-  <span id="status" class="status">연결 중…</span>
+  <label class="check"><input type="checkbox" id="follow" checked> <span data-en="Follow latest session">최근 세션 따라가기</span></label>
+  <span id="status" class="status"></span>
   <span class="export-box">
-    <button id="export" type="button" title="이 세션을 서버 없이 열리는 HTML 파일 하나로 저장">공유용 HTML</button>
-    <label class="check" title="결과 미리보기 · 명령 · 입력 · 답변 본문을 빼고 저장"><input type="checkbox" id="redact" checked> 내용 가리기</label>
+    <button id="export" type="button" title="이 세션을 서버 없이 열리는 HTML 파일 하나로 저장" data-en="Share as HTML" data-en-title="Save this session as one HTML file that opens without a server">공유용 HTML</button>
+    <label class="check" title="결과 미리보기 · 명령 · 입력 · 답변 본문을 빼고 저장" data-en-title="Leave out tool output, commands, prompts and answer text"><input type="checkbox" id="redact" checked> <span data-en="Redact">내용 가리기</span></label>
   </span>
+  <button id="lang" type="button" class="repo"></button>
   <a class="repo" href="https://github.com/workdd/context-brain" target="_blank" rel="noopener">GitHub</a>
 </header>
 
 <main>
   <section id="brainbox" class="card">
     <div class="brain-bar">
-      <h2>컨텍스트 뇌</h2>
+      <h2 data-en="Context brain">컨텍스트 뇌</h2>
       <div class="turn-step">
-        <button id="turn-prev" type="button" aria-label="이전 턴">◀</button>
+        <button id="turn-prev" type="button" aria-label="previous turn">◀</button>
         <span id="turn-label">-</span>
-        <button id="turn-next" type="button" aria-label="다음 턴">▶</button>
+        <button id="turn-next" type="button" aria-label="next turn">▶</button>
       </div>
       <div class="views">
-        <button type="button" data-cam="side">옆</button>
-        <button type="button" data-cam="top">위</button>
-        <button type="button" data-cam="front">앞</button>
-        <button type="button" id="rotate">회전</button>
+        <button type="button" data-cam="side" data-en="Side">옆</button>
+        <button type="button" data-cam="top" data-en="Top">위</button>
+        <button type="button" data-cam="front" data-en="Front">앞</button>
+        <button type="button" id="rotate" data-en="Rotate">회전</button>
       </div>
-      <button id="brain-size" type="button">크게</button>
+      <button id="brain-size" type="button"></button>
     </div>
     <div id="stage">
       <div id="ring" class="overlay"></div>
       <div id="key" class="overlay">
-        <span><i class="k-size"></i>크기 = 토큰</span>
-        <span><i class="k-now"></i>밝음 = 보고 있는 턴에 쓰임</span>
-        <span><i class="k-old"></i>회색 = 압축으로 빠짐</span>
-        <span><i class="k-waste"></i>붉게 숨쉼 = 낭비 후보</span>
-        <span><i class="k-flow"></i>흰 입자 = 답변에 이름이 나온 근거</span>
-        <span class="k-tip">영역 이름을 누르면 확대 · 뉴런을 누르면 상세 · Space 재생</span>
+        <span><i class="k-size"></i><b data-en="size = tokens">크기 = 토큰</b></span>
+        <span><i class="k-now"></i><b data-en="bright = used in the turn you are viewing">밝음 = 보고 있는 턴에 쓰임</b></span>
+        <span><i class="k-old"></i><b data-en="grey = dropped by compaction">회색 = 압축으로 빠짐</b></span>
+        <span><i class="k-waste"></i><b data-en="red pulse = likely dead weight">붉게 숨쉼 = 낭비 후보</b></span>
+        <span><i class="k-flow"></i><b data-en="white particles = named in the answer (evidence)">흰 입자 = 답변에 이름이 나온 근거</b></span>
+        <span class="k-tip" data-en="Click a region to zoom · a neuron for details · Space to replay">영역 이름을 누르면 확대 · 뉴런을 누르면 상세 · Space 재생</span>
       </div>
       <aside id="detail" class="overlay" hidden></aside>
       <div id="player" class="overlay">
-        <button id="play" type="button">▶ 처음부터 재생</button>
-        <input id="scrub" type="range" min="0" max="0" value="0" aria-label="재생 위치">
-        <select id="speed" aria-label="재생 속도"><option value="4">4배</option><option value="16" selected>16배</option><option value="64">64배</option></select>
+        <button id="play" type="button"></button>
+        <input id="scrub" type="range" min="0" max="0" value="0" aria-label="replay position">
+        <select id="speed" aria-label="replay speed"><option value="4">4×</option><option value="16" selected>16×</option><option value="64">64×</option></select>
         <span id="play-time"></span>
       </div>
     </div>
@@ -68,18 +70,18 @@
   <section id="budget" class="card">
     <div class="budget-head">
       <div class="ctx-now">
-        <div class="label">현재 컨텍스트 <small>API 실측</small></div>
+        <div class="label"><span data-en="Context now">현재 컨텍스트</span> <small data-en="measured by the API">API 실측</small></div>
         <div class="big" id="ctx">-</div>
       </div>
       <div class="gauge">
         <div class="gauge-bar"><i id="gauge-fill"></i></div>
         <div class="gauge-note" id="gauge-note"></div>
       </div>
-      <canvas id="spark" width="220" height="44" aria-label="컨텍스트 크기 변화"></canvas>
+      <canvas id="spark" width="220" height="44" aria-label="context size over time"></canvas>
     </div>
     <div class="budget-body">
       <div class="map-wrap">
-        <div class="label">자리를 차지한 것 <small>타일 크기 = 글자 수 기반 추정 토큰 · <span id="map-note"></span></small></div>
+        <div class="label"><span data-en="What takes up the space">자리를 차지한 것</span> <small><span data-en="tile size = estimated tokens from character count">타일 크기 = 글자 수 기반 추정 토큰</span> · <span id="map-note"></span></small></div>
         <div id="treemap"></div>
       </div>
       <aside id="waste"></aside>
@@ -87,7 +89,7 @@
   </section>
 
   <section id="timeline" class="card">
-    <div class="card-head"><h2>턴 타임라인</h2><span class="hint">입력 → 도구 호출 → 답변. 답변 문장 옆 칩은 그 문장에 이름이 나온 근거입니다</span></div>
+    <div class="card-head"><h2 data-en="Turn timeline">턴 타임라인</h2><span class="hint" data-en="prompt → tool calls → answer. Chips next to an answer sentence are the items it names">입력 → 도구 호출 → 답변. 답변 문장 옆 칩은 그 문장에 이름이 나온 근거입니다</span></div>
     <ol id="turns"></ol>
   </section>
 </main>
