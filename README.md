@@ -20,7 +20,7 @@ That's it. It opens your browser and follows your most recent Claude Code sessio
 | What did this answer actually use? | Light beams from items into the Response region (thickness = tokens returned). White particles = the answer names that item |
 | What is just taking up space? | Red pulsing neurons: 800+ tokens, not used again for more than 2 turns |
 | How close am I to auto-compaction? | The ring in the corner, against the size where your recent sessions actually compacted |
-| How did the session unfold? | Replay: scrub through the whole session and watch the brain grow turn by turn |
+| When and why did the context grow? | The context history strip under the brain: size per API call by region, the biggest jumps labeled with their cause, compactions marked |
 | What should I change? | Context doctor: each leak with its size and a concrete fix, in the browser, the terminal and the Claude Code status line |
 
 ## Context doctor
@@ -83,7 +83,10 @@ It reads `transcript_path` from the status line input and caches the compaction 
 ## Features
 
 - **Live**: tails the session log every 0.4 s and pushes events over Server-Sent Events. Tool calls flash in their region, results flow back in white.
-- **Replay**: replay any session from the start at 4×, 16× or 64×, or drag the slider to any point. `Space` plays and pauses.
+- **Context history strip**: along the bottom of the brain, one point per API call. Stacked bands show what the context is made of (same colors as the regions), the white line is the measured size, red marks compactions and the compaction point. The biggest jumps carry the name of what caused them.
+  - Hover a point: the context's makeup at that call and every item that came in since the previous call. Growth the log has no content for (thinking, response text) is shown separately.
+  - Click a point: the brain, panels and doctor go back to that moment. `←` `→` step one API call, "Now" returns to live.
+  - Replay at 4×, 16× or 64× is still there for watching a session unfold.
 - **Turn stepping**: `[` and `]` (or ◀ ▶) re-light the brain for a past turn: which items it used, which beams fed the answer.
 - **Share as one HTML file**: export a session as a single self-contained HTML that opens without a server and replays itself. Redaction is on by default.
 - **Click anything**: a region badge zooms the camera and lists its items. A neuron shows the full command or edit, the start of its output, its use history and the turns it appeared in.
@@ -149,7 +152,7 @@ parser (lib/parse.js)
         ▼
 lib/tokens.js        token estimate (fitted coefficients, image size) · lib/calibrate.js fits them
 lib/project.js       parses a project's recent sessions (cached by mtime)
-browser: public/app.js (three.js brain, panels, replay) + public/model.js (treemap, evidence, doctor, project doctor)
+browser: public/app.js (three.js brain, panels, history strip) + public/model.js (treemap, evidence, doctor, project doctor)
 terminal: bin/context-brain.js doctor | statusline (same public/model.js)
 ```
 
