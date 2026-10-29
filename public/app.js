@@ -1200,7 +1200,11 @@ async function refreshSessions() {
     sel.appendChild(o);
   }
   sel.value = currentFile || keep;
-  if ($('follow').checked && list[0] && currentFile && list[0].file !== currentFile) connect(list[0].file);
+  // 따라가기는 지금 보는 세션과 같은 프로젝트 안에서만. 다른 터미널의 다른 프로젝트로 넘어가지 않는다
+  if (!$('follow').checked || !currentFile) return;
+  const dir = currentFile.slice(0, currentFile.lastIndexOf('/') + 1);
+  const next = list.find((x) => x.file.startsWith(dir) && !x.file.slice(dir.length).includes('/'));
+  if (next && next.file !== currentFile) connect(next.file);
 }
 
 $('session').addEventListener('change', (ev) => { $('follow').checked = false; connect(ev.target.value); });
