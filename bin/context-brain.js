@@ -165,9 +165,9 @@ function cachedByModel() {
 }
 
 function statusLine(file) {
-  const { parseFile } = require('../lib/export');
+  const { parseIncremental } = require('../lib/incremental');
   const { diagnose, pickCompact, lastModel } = require('../public/model.js');
-  const events = parseFile(file);
+  const events = parseIncremental(file);
   const r = diagnose(events, { compactAt: pickCompact(cachedByModel(), lastModel(events)).at });
   const k = (n) => (n >= 1000 ? Math.round(n / 1000) + 'k' : String(Math.round(n || 0)));
   const parts = [`ctx ${r.context == null ? '-' : k(r.context)}${r.compactAt && r.context ? ` (${Math.round((r.context / r.compactAt) * 100)}%)` : ''}`];
