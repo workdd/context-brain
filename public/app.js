@@ -178,7 +178,7 @@ function getNeuron(e) {
   const mesh = new THREE.Mesh(neuronGeo, mat);
   mesh.position.copy(neuronPosition(e.lobe, e.id));
   neuronGroup.add(mesh);
-  n = { id: e.id, lobe: e.lobe, label: e.label, mesh, act: 0, tokens: 0, uses: 0, counts: {}, compacted: false, last: null, history: [] };
+  n = { id: e.id, lobe: e.lobe, label: e.label, mesh, act: 0, turn: 0, tokens: 0, uses: 0, counts: {}, compacted: false, last: null, history: [] };
   mesh.userData.neuron = n;
   neurons.set(e.id, n);
   return n;
@@ -200,6 +200,97 @@ function spawnPulse(from, to, color) {
   pulses.push({ curve, line, dot, age: 0, life: 1.1 });
 }
 
+// ── 턴: 사용자 입력 하나부터 다음 입력 전까지 ───────────────────
+// 이번 턴에 쓰인 뉴런과 경로는 켜진 채로 두고, 지난 턴은 잔상으로만 남긴다
+const HOLD_NOW = 0.45, HOLD_PREV = 0.1;
+const PATH_NOW = 0.28, PATH_PREV = 0.06;
+let turn = 0;
+let turnInfo = null;
+const turnPaths = new Map(); // 뉴런 id → { line, turn }
+
+function startTurn(e) {
+  turn++;
+  turnInfo = { n: turn, label: e.label, t: e.t, items: new Map(), added: 0, done: false, ms: 0 };
+  for (const [id, p] of turnPaths) {
+    if (p.turn < turn - 1) { scene.remove(p.line); p.line.geometry.dispose(); p.line.material.dispose(); turnPaths.delete(id); }
+    else p.line.material.opacity = PATH_PREV;
+  }
+}
+
+function pathCurve(from, to) {
+  return new THREE.QuadraticBezierCurve3(from.clone(), from.clone().add(to).multiplyScalar(0.225), to.clone());
+}
+
+function holdPath(n) {
+  if (n.lobe === 'output') return;
+  const old = turnPaths.get(n.id);
+  if (old && old.turn === turn) return;
+  if (old) { scene.remove(old.line); old.line.geometry.dispose(); old.line.material.dispose(); }
+  const line = new THREE.Line(
+    new THREE.BufferGeometry().setFromPoints(pathCurve(anchors.output, n.mesh.position).getPoints(32)),
+    new THREE.LineBasicMaterial({ color: LOBE_META[n.lobe].color, transparent: true, opacity: PATH_NOW, blending: THREE.AdditiveBlending, depthWrite: false }),
+  );
+  scene.add(line);
+  turnPaths.set(n.id, { line, turn });
+}
+
+function trackTurn(e, n) {
+  if (e.lobe === 'dialog' && e.kind === 'use' && !e.id.startsWith('dlg:summary')) startTurn(e);
+  if (!turnInfo || e.kind === 'load') return;
+  n.turn = turn;
+  holdPath(n);
+  if (e.lobe === 'output' || e.lobe === 'dialog') return;
+  const it = turnInfo.items.get(n.id) || { n, tokens: 0, kinds: new Set() };
+  it.kinds.add(e.kind);
+  if (e.kind === 'result') { it.tokens += e.tokens || 0; turnInfo.added += e.tokens || 0; }
+  turnInfo.items.set(n.id, it);
+}
+
+// 늘 실려 있는 영역: 턴마다 새로 쓰지 않아도 컨텍스트에 들어 있다
+const STANDING = ['rules', 'system', 'abilities', 'memory'];
+let turnFolded = false;
+
+function renderTurn() {
+  const box = $('turn');
+  if (!turnInfo) { box.hidden = true; return; }
+  const items = [...turnInfo.items.values()];
+  const byLobe = {};
+  for (const it of items) (byLobe[it.n.lobe] ||= []).push(it);
+  const dot = (l) => `<i style="background:${hex(LOBE_META[l].color)}"></i>`;
+  const time = turnInfo.t ? new Date(turnInfo.t).toLocaleTimeString('en-GB') : '';
+  const state = turnInfo.done ? `답변 완료 · ${(turnInfo.ms / 1000).toFixed(1)}초` : '진행 중';
+  let body;
+  if (!turnInfo.done) {
+    const chips = lobeNames.filter((l) => byLobe[l]).map((l) => `<span class="chip">${dot(l)}${LOBE_NAMES[l] || l} ${byLobe[l].length}</span>`).join('');
+    const top = items.filter((it) => it.tokens > 0).sort((a, b) => b.tokens - a.tokens).slice(0, 3);
+    body = `<div class="chips">${chips || '<span class="t-empty">아직 쓰인 영역 없음</span>'}</div>
+      ${top.length ? `<ol class="t-top">${top.map((it) => `<li data-id="${escapeHtml(it.n.id)}">${dot(it.n.lobe)}
+        <span>${escapeHtml(it.n.label)}</span><b>${fmt(it.tokens)}</b></li>`).join('')}</ol>` : ''}`;
+  } else {
+    // 답변이 끝나면 이번 턴에 본 것을 영역별로 전부 펼친다
+    const groups = lobeNames.filter((l) => byLobe[l]).map((l) => `<div class="t-group"><div class="t-lobe">${dot(l)}${LOBE_NAMES[l] || l}</div>
+      <ol class="t-top">${byLobe[l].sort((a, b) => b.tokens - a.tokens).map((it) => `<li data-id="${escapeHtml(it.n.id)}">
+        <span>${escapeHtml(it.n.label)}</span><em>${[...it.kinds].map((k) => KIND_LABEL[k] || k).join(' · ')}</em>
+        <b>${it.tokens ? fmt(it.tokens) : '-'}</b></li>`).join('')}</ol></div>`).join('');
+    const standing = STANDING.map((l) => {
+      let count = 0, tokens = 0;
+      for (const n of neurons.values()) if (n.lobe === l && !n.compacted) { count++; tokens += n.tokens; }
+      return count ? `<span class="chip">${dot(l)}${LOBE_NAMES[l] || l} ${count}개 · ${fmt(tokens)}</span>` : '';
+    }).join('');
+    body = `${groups || '<div class="t-empty">이번 턴에는 도구를 쓰지 않고 답했습니다</div>'}
+      <div class="t-standing"><div class="t-lobe">늘 실려 있던 것</div><div class="chips">${standing}</div></div>`;
+  }
+  box.innerHTML = `<div class="t-head"><span class="t-title">${turnInfo.done ? '이번 답변이 본 정보' : '이번 턴'} #${turnInfo.n}</span>
+      <span class="t-meta">${time} 시작 · ${state} · 들어온 양 약 ${fmt(turnInfo.added)} 토큰</span>
+      <button type="button" class="t-fold">${turnFolded ? '펼치기' : '접기'}</button></div>
+    <div class="t-prompt">${escapeHtml(turnInfo.label)}</div>
+    ${turnFolded ? '' : body}`;
+  box.classList.toggle('done', turnInfo.done);
+  box.querySelector('.t-fold').addEventListener('click', () => { turnFolded = !turnFolded; renderTurn(); });
+  box.querySelectorAll('.t-top li').forEach((li) => li.addEventListener('click', () => { const n = neurons.get(li.dataset.id); if (n) select(n); }));
+  box.hidden = false;
+}
+
 // ── 이벤트 적용 ────────────────────────────────────────────
 let ctxHistory = [];
 let globalFlash = 0;
@@ -209,6 +300,10 @@ function applyEvent(e, animate) {
     ctxHistory.push(e.tokens);
     if (ctxHistory.length > 80) ctxHistory.shift();
     if (animate) drawCtx();
+    return;
+  }
+  if (e.kind === 'turn_end') {
+    if (turnInfo) { turnInfo.done = true; turnInfo.ms = e.durationMs; }
     return;
   }
   if (e.kind === 'compact') {
@@ -226,6 +321,7 @@ function applyEvent(e, animate) {
   n.last = e;
   n.history.push(e);
   if (n.history.length > HISTORY_MAX) n.history.shift();
+  trackTurn(e, n);
   if (!animate) return;
   n.act = Math.min(1.4, n.act + (KIND_WEIGHT[e.kind] || 0.8));
   applyEventPulse(e);
@@ -240,8 +336,12 @@ const fmt = (n) => Math.round(n).toLocaleString('ko-KR');
 function logEvent(e, fresh) {
   if (e.kind === 'usage') return;
   const li = document.createElement('li');
-  const time = e.t ? new Date(e.t).toLocaleTimeString('ko-KR', { hour12: false }) : '';
-  if (e.kind === 'compact') {
+  const time = e.t ? new Date(e.t).toLocaleTimeString('en-GB') : '';
+  if (e.kind === 'turn_end') {
+    li.className = 'turn-end';
+    li.innerHTML = `<span class="time">${time}</span><span class="dot" style="background:#9be7a8"></span>
+      <span class="what">답변 완료 <span class="meta">${(e.durationMs / 1000).toFixed(1)}초</span></span>`;
+  } else if (e.kind === 'compact') {
     li.className = 'compact';
     li.innerHTML = `<span class="time">${time}</span><span class="dot" style="background:#ff6b6b"></span>
       <span class="what">${e.label} <span class="meta">직전 ${fmt(e.tokens)} 토큰</span></span>`;
@@ -348,7 +448,7 @@ function renderDetail() {
   const n = selected;
   const counts = Object.entries(n.counts).map(([k, v]) => `${KIND_LABEL[k] || k} ${v}회`).join(' · ');
   const rows = n.history.slice().reverse().map((e) => {
-    const time = e.t ? new Date(e.t).toLocaleTimeString('ko-KR', { hour12: false }) : '';
+    const time = e.t ? new Date(e.t).toLocaleTimeString('en-GB') : '';
     return `<li><div class="d-head"><span class="kind">${KIND_LABEL[e.kind] || e.kind}</span>${time}
       ${e.tokens ? ` · 약 ${fmt(e.tokens)} 토큰` : ''}${e.error ? ' · <b class="err">오류</b>' : ''}${e.tool ? ' · ' + e.tool : ''}</div>
       ${e.input ? `<pre>${escapeHtml(e.input)}</pre>` : e.detail ? `<div class="d-note">${escapeHtml(e.detail)}</div>` : ''}
@@ -364,6 +464,24 @@ function renderDetail() {
   box.hidden = false;
 }
 
+// 자극 기록 패널: 접기와 한 줄 축약. 선택은 이 브라우저에만 기억한다
+function logPref(key, value) {
+  try {
+    if (value === undefined) return localStorage.getItem('cb.' + key) === '1';
+    localStorage.setItem('cb.' + key, value ? '1' : '0');
+  } catch (_) { return false; }
+}
+function applyLogPrefs() {
+  const folded = logPref('folded'), compact = logPref('compact');
+  $('log').classList.toggle('folded', folded);
+  $('log').classList.toggle('compact', compact);
+  $('log-fold').textContent = folded ? '펼치기' : '접기';
+  $('log-compact').textContent = compact ? '자세히' : '축약';
+}
+$('log-fold').addEventListener('click', () => { logPref('folded', !logPref('folded')); applyLogPrefs(); });
+$('log-compact').addEventListener('click', () => { logPref('compact', !logPref('compact')); applyLogPrefs(); });
+applyLogPrefs();
+
 // ── 세션 연결 ─────────────────────────────────────────────
 let source = null;
 let currentFile = null;
@@ -375,6 +493,10 @@ function reset() {
   renderDetail();
   ctxHistory = [];
   $('events').innerHTML = '';
+  for (const p of turnPaths.values()) { scene.remove(p.line); p.line.geometry.dispose(); p.line.material.dispose(); }
+  turnPaths.clear();
+  turn = 0;
+  turnInfo = null;
 }
 
 function connect(file) {
@@ -389,6 +511,7 @@ function connect(file) {
     $('session').value = currentFile;
     for (const e of data.events) { applyEvent(e, false); logEvent(e, false); }
     renderLegend();
+    renderTurn();
     drawCtx();
     // 마지막 몇 개는 다시 재생해 지금 흐름을 보여 준다
     data.events.filter((e) => e.kind !== 'usage').slice(-14).forEach((e, i) => {
@@ -399,7 +522,8 @@ function connect(file) {
   source.addEventListener('events', (m) => {
     for (const e of JSON.parse(m.data)) { applyEvent(e, true); logEvent(e, true); }
     renderLegend();
-    $('status').textContent = `실시간 · 마지막 갱신 ${new Date().toLocaleTimeString('ko-KR', { hour12: false })}`;
+    renderTurn();
+    $('status').textContent = `실시간 · 마지막 갱신 ${new Date().toLocaleTimeString('en-GB')}`;
   });
   source.onerror = () => { $('status').textContent = '연결 끊김 · 다시 시도 중'; };
 }
@@ -443,30 +567,33 @@ function frame() {
   const decay = Math.exp(-dt / DECAY_SEC);
   globalFlash *= Math.exp(-dt / 0.6);
 
-  for (const l of lobeNames) lobeState[l].act = 0;
+  for (const l of lobeNames) { lobeState[l].act = 0; lobeState[l].hold = 0; }
   for (const n of neurons.values()) {
     n.act *= decay;
+    const hold = n.compacted || !n.turn ? 0 : n.turn === turn ? HOLD_NOW : n.turn === turn - 1 ? HOLD_PREV : 0;
     const ls = lobeState[n.lobe];
     ls.act = Math.max(ls.act, n.act);
-    const r = radiusFor(n.tokens) * (1 + 0.35 * Math.min(n.act, 1.5));
+    ls.hold = Math.max(ls.hold, hold);
+    const r = radiusFor(n.tokens) * (1 + 0.35 * Math.min(n.act + hold, 1.5));
     n.mesh.scale.setScalar(r);
     if (n.compacted) {
       n.mesh.material.color.copy(grey).multiplyScalar(0.35 + n.act);
       n.mesh.material.opacity = 0.45;
     } else {
-      n.mesh.material.color.copy(ls.color).multiplyScalar(0.35 + 0.8 * n.act);
+      n.mesh.material.color.copy(ls.color).multiplyScalar(0.3 + 0.8 * (n.act + hold));
       n.mesh.material.opacity = 1;
     }
   }
 
   // 표면 점: 활성 영역 근처가 그 영역 색으로 물든다. 조용할 때는 한 번만 바탕색으로 되돌린다
-  const busy = globalFlash > 0.01 || lobeNames.some((l) => lobeState[l].act > 0.01);
+  const busy = globalFlash > 0.01 || lobeNames.some((l) => lobeState[l].act > 0.01 || lobeState[l].hold > 0.01);
   if (busy || shellDirty) for (let i = 0; i < shellCount; i++) {
     tmp.copy(BASE);
     const li = pointLobe[i];
     if (li >= 0) {
       const ls = lobeState[lobeNames[li]];
-      if (ls.act > 0.01) tmp.lerp(ls.color, Math.min(1, ls.act * pointWeight[i] * 0.6)).multiplyScalar(1 + ls.act * pointWeight[i] * 0.6);
+      const a = Math.max(ls.act, ls.hold * 0.6);
+      if (a > 0.01) tmp.lerp(ls.color, Math.min(1, a * pointWeight[i] * 0.6)).multiplyScalar(1 + a * pointWeight[i] * 0.6);
     }
     if (globalFlash > 0.01) tmp.lerp(FLASH, globalFlash * 0.5);
     shellColors[i * 3] = tmp.r; shellColors[i * 3 + 1] = tmp.g; shellColors[i * 3 + 2] = tmp.b;
@@ -474,7 +601,7 @@ function frame() {
   if (busy || shellDirty) shellGeo.attributes.color.needsUpdate = true;
   shellDirty = busy;
 
-  for (const l of lobeNames) lobeState[l].el.style.opacity = String(0.45 + Math.min(0.55, lobeState[l].act));
+  for (const l of lobeNames) lobeState[l].el.style.opacity = String(0.45 + Math.min(0.55, lobeState[l].act + lobeState[l].hold));
 
   for (let i = pulses.length - 1; i >= 0; i--) {
     const p = pulses[i];

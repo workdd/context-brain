@@ -76,6 +76,12 @@ describe('parseEntry', () => {
     expect(parseEntry(user('meta', { isMeta: true }), s)).toEqual([]);
   });
 
+  test('턴 종료 기록은 turn_end 이벤트가 된다', () => {
+    expect(parseEntry({ type: 'system', subtype: 'turn_duration', timestamp: T, durationMs: 1234 }, createState()))
+      .toEqual([{ t: Date.parse(T), kind: 'turn_end', durationMs: 1234 }]);
+    expect(parseEntry({ type: 'system', subtype: 'turn_duration' }, createState())[0].durationMs).toBe(0);
+  });
+
   test('압축 경계와 압축 요약', () => {
     const s = createState();
     expect(parseEntry({ type: 'system', subtype: 'compact_boundary', timestamp: T, compactMetadata: { trigger: 'auto', preTokens: 9 } }, s)[0])

@@ -61,7 +61,8 @@ const steps = [
   tool('Edit', { file_path: '/home/dev/shop-api/src/auth/token.ts', old_string: 'jwt.verify(t, key)', new_string: 'jwt.verify(t, key, { clockTolerance: 30 })' },
     'The file has been updated successfully.', 300),
   tool('Bash', { command: 'npm test -- auth', description: '수정 후 인증 테스트 재실행' }, 'PASS src/auth/token.test.ts\n  ✓ accepts token near expiry', 300),
-  [assistant([{ type: 'text', text: '원인은 서버 간 시계 차이입니다. token.ts 에서 만료 검증에 30초 여유를 주도록 고쳤고, 인증 테스트가 통과합니다.' }], 400)],
+  [assistant([{ type: 'text', text: '원인은 서버 간 시계 차이입니다. token.ts 에서 만료 검증에 30초 여유를 주도록 고쳤고, 인증 테스트가 통과합니다.' }], 400),
+    { type: 'system', subtype: 'turn_duration', timestamp: ts(), durationMs: 31400 }],
 ];
 
 const write = (entries) => fs.appendFileSync(file, entries.map((e) => JSON.stringify(e)).join('\n') + '\n');

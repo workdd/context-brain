@@ -39,8 +39,14 @@
   <p class="note">→ 사용: 응답에서 영역으로 나가는 빛 (영역 색)<br>← 결과: 영역에서 응답으로 돌아오는 빛 (흰색)<br>크기 = 토큰 (글자 수/4 추정) · 회색 = 압축으로 빠짐<br>뉴런을 클릭하면 자세히 볼 수 있습니다</p>
 </section>
 
+<section id="turn" class="panel" hidden></section>
+
 <section id="log" class="panel">
-  <h2>자극 기록</h2>
+  <div class="log-head">
+    <h2>자극 기록</h2>
+    <button id="log-compact" type="button">축약</button>
+    <button id="log-fold" type="button">접기</button>
+  </div>
   <ol id="events"></ol>
 </section>
 

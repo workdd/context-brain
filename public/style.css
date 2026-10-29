@@ -41,7 +41,7 @@ h2 { margin: 0 0 8px; font-size: 12px; color: var(--dim); font-weight: 600; lett
 
 #log { top: 16px; right: 16px; bottom: 16px; width: 330px; display: flex; flex-direction: column; }
 #events { list-style: none; margin: 0; padding: 0; overflow-y: auto; flex: 1; }
-#events li { display: grid; grid-template-columns: 52px 10px 1fr; gap: 8px; align-items: start;
+#events li { display: grid; grid-template-columns: 56px 10px 1fr; gap: 8px; align-items: start;
   padding: 5px 2px; border-bottom: 1px solid rgba(255, 255, 255, 0.04); cursor: pointer; font-size: 12px; }
 #events li.fresh { animation: fresh 1.6s ease-out; }
 @keyframes fresh { from { background: rgba(255, 255, 255, 0.12); } to { background: transparent; } }
@@ -61,6 +61,49 @@ h2 { margin: 0 0 8px; font-size: 12px; color: var(--dim); font-weight: 600; lett
   border-radius: 8px; padding: 8px 10px; font-size: 12px; max-width: 320px; z-index: 5; }
 .tip b { display: block; margin-bottom: 2px; overflow-wrap: anywhere; }
 .tip span { color: var(--dim); display: block; overflow-wrap: anywhere; }
+
+#turn { top: 16px; left: 50%; transform: translateX(-50%); width: min(520px, calc(100vw - 700px)); z-index: 3; }
+#turn[hidden] { display: none; }
+#turn { max-height: 38vh; overflow-y: auto; }
+#turn.done { border-color: rgba(155, 231, 168, 0.45); }
+.t-head { display: flex; align-items: baseline; gap: 8px; }
+.t-title { color: var(--text); }
+#turn.done .t-title { color: #9be7a8; }
+.t-meta { flex: 1; font-weight: 400; }
+.t-fold { background: rgba(255, 255, 255, 0.06); color: var(--dim); border: 1px solid var(--line);
+  border-radius: 6px; font-size: 11px; padding: 1px 8px; cursor: pointer; }
+.t-group { margin-top: 8px; }
+.t-lobe { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--dim); font-weight: 600; }
+.t-lobe i { width: 7px; height: 7px; border-radius: 50%; }
+.t-group .t-top { margin: 2px 0 0 13px; padding: 0; border: 0; }
+.t-top li em { font-style: normal; font-size: 10px; color: var(--dim); white-space: nowrap; }
+.t-standing { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--line); }
+.t-standing .chips { margin-top: 4px; }
+#events li.turn-end .what { color: #9be7a8; }
+.t-head { font-size: 12px; font-weight: 600; color: var(--dim); letter-spacing: 0.04em; }
+.t-prompt { margin: 4px 0 8px; font-size: 14px; overflow-wrap: anywhere; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; padding: 2px 8px; border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06); }
+.chip i, .t-top i { width: 7px; height: 7px; border-radius: 50%; display: inline-block; flex: none; }
+.t-empty { font-size: 11px; color: var(--dim); }
+.t-top { list-style: none; margin: 8px 0 0; padding: 8px 0 0; border-top: 1px solid var(--line); }
+.t-top li { display: flex; align-items: center; gap: 8px; font-size: 12px; padding: 2px 0; cursor: pointer; }
+.t-top li span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.t-top li b { font-weight: 500; color: var(--dim); font-variant-numeric: tabular-nums; }
+.t-top li:hover span { text-decoration: underline; }
+
+.log-head { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
+.log-head h2 { margin: 0; flex: 1; }
+.log-head button { background: rgba(255, 255, 255, 0.06); color: var(--dim); border: 1px solid var(--line);
+  border-radius: 6px; font-size: 11px; padding: 2px 8px; cursor: pointer; }
+.log-head button:hover { color: var(--text); }
+#log.folded { bottom: auto; }
+#log.folded #events { display: none; }
+#log.folded .log-head { margin-bottom: 0; }
+#log.compact #events li { padding: 3px 2px; }
+#log.compact #events .meta { display: none; }
+#log.compact #events .what { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 #detail { left: 312px; right: 362px; bottom: 16px; max-height: 46vh; overflow-y: auto; z-index: 4; }
 #detail[hidden] { display: none; }
@@ -85,6 +128,7 @@ h2 { margin: 0 0 8px; font-size: 12px; color: var(--dim); font-weight: 600; lett
 
 @media (max-width: 900px) {
   #detail { left: 16px; right: 16px; bottom: calc(34vh + 24px); max-height: 36vh; }
+  #turn { top: auto; bottom: calc(34vh + 24px); width: calc(100vw - 32px); }
   #log { top: auto; height: 34vh; left: 16px; right: 16px; width: auto; }
   #legend { display: none; }
   #hud { width: auto; right: 16px; }
