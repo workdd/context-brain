@@ -1,4 +1,5 @@
 const { createState, parseEntry, parseLines, shellProgram, estTokens, preview, inputText } = require('../lib/parse');
+const { coefficients } = require('../lib/tokens');
 
 const T = '2026-10-29T01:07:05.000Z';
 const assistant = (content, usage) => ({ type: 'assistant', timestamp: T, message: { model: 'm', content, usage } });
@@ -10,7 +11,7 @@ describe('parseEntry', () => {
       type: 'attachment', timestamp: T,
       attachment: { type: 'instructions', files: [{ path: '/Users/a/CLAUDE.md', type: 'User', content: 'x'.repeat(40) }] },
     }, createState());
-    expect(ev).toEqual([expect.objectContaining({ lobe: 'rules', id: 'rule:/Users/a/CLAUDE.md', label: 'a/CLAUDE.md', kind: 'load', tokens: 10 })]);
+    expect(ev).toEqual([expect.objectContaining({ lobe: 'rules', id: 'rule:/Users/a/CLAUDE.md', label: 'a/CLAUDE.md', kind: 'load', tokens: estTokens('x'.repeat(40)) })]);
   });
 
   test('도구 호출과 결과가 tool_use_id 로 이어진다', () => {
@@ -18,7 +19,7 @@ describe('parseEntry', () => {
     const use = parseEntry(assistant([{ type: 'tool_use', id: 't1', name: 'Read', input: { file_path: '/repo/src/server.js' } }]), s);
     expect(use[0]).toMatchObject({ lobe: 'files', id: 'file:/repo/src/server.js', label: 'src/server.js', kind: 'use', detail: 'Read' });
     const res = parseEntry(user([{ type: 'tool_result', tool_use_id: 't1', content: 'y'.repeat(400) }]), s);
-    expect(res[0]).toMatchObject({ id: 'file:/repo/src/server.js', kind: 'result', tokens: 100, error: false });
+    expect(res[0]).toMatchObject({ id: 'file:/repo/src/server.js', kind: 'result', tokens: estTokens('y'.repeat(400)) + coefficients().perResult, error: false });
     expect(s.pending.size).toBe(0);
   });
 
@@ -123,10 +124,11 @@ describe('보조 함수', () => {
   });
   test('estTokens', () => {
     expect(estTokens(null)).toBe(0);
-    expect(estTokens('abcde')).toBe(2);
-    expect(estTokens({ a: 1 })).toBe(2);
+    expect(estTokens('abcde')).toBe(Math.ceil(5 * coefficients().ascii));
+    expect(estTokens('한글')).toBe(Math.ceil(2 * coefficients().hangul));
+    expect(estTokens({ a: 1 })).toBe(Math.ceil(7 * coefficients().ascii));
     const img = { type: 'image', source: { type: 'base64', data: 'A'.repeat(100000) } };
-    expect(estTokens([img, { type: 'text', text: 'abcd' }])).toBe(1601);
+    expect(estTokens([img, { type: 'text', text: 'abcd' }])).toBe(1600 + Math.ceil(4 * coefficients().ascii));
   });
   test('preview 는 이미지를 자리표시로 바꾸고 길이를 자른다', () => {
     expect(preview([{ type: 'image' }, { type: 'text', text: 'hi' }])).toBe('[이미지]\nhi');

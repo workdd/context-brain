@@ -5,6 +5,7 @@
 // context-brain export [세션.jsonl|latest] [-o 파일.html] [--redact]
 // context-brain doctor [세션.jsonl|latest] [--json]   토큰이 새는 곳과 줄이는 법
 // context-brain statusline    Claude Code 상태줄용 한 줄 (stdin 의 transcript_path 를 읽음)
+// context-brain calibrate     내 세션 실측 사용량으로 토큰 추정 계수를 맞춰 저장
 
 const fs = require('fs');
 const path = require('path');
@@ -26,6 +27,7 @@ const HELP = L(`context-brain: Claude Code 컨텍스트를 3D 뇌로 보는 로�
       --redact                       결과 미리보기 · 명령 · 입력 · 답변 본문을 빼고 저장
   context-brain doctor [세션|latest]  토큰이 새는 곳과 줄이는 법을 터미널에 출력 (--json)
   context-brain statusline           Claude Code 상태줄에 컨텍스트 · 되찾을 양 표시
+  context-brain calibrate            내 세션 실측 사용량으로 토큰 추정 계수를 맞춰 저장
 
   --port <번호>   포트 (차 있으면 다음 번호)
   --no-open       브라우저를 열지 않음`, `context-brain: a live 3D brain of your Claude Code session context
@@ -37,6 +39,7 @@ const HELP = L(`context-brain: Claude Code 컨텍스트를 3D 뇌로 보는 로�
       --redact                          leave out tool output, commands, prompts and answer text
   context-brain doctor [file|latest]    print where tokens leak and how to cut them (--json)
   context-brain statusline              one line for the Claude Code status line (context · reclaimable)
+  context-brain calibrate               fit token estimates to your own sessions' measured usage and save them
 
   --port <n>      port (falls through to the next free one)
   --no-open       do not open the browser`);
@@ -65,6 +68,22 @@ if (flag('-h') || flag('--help') || cmd === 'help') {
     if (!file) file = (require('../lib/sessions').listSessions(undefined, 1)[0] || {}).file;
     console.log(file && fs.existsSync(file) ? statusLine(file) : 'context-brain: -');
   });
+} else if (cmd === 'calibrate') {
+  const { calibrate, save, listSessions } = require('../lib/calibrate');
+  const r = calibrate(listSessions(undefined, 1000).map((x) => x.file));
+  if (!r.coef) {
+    console.error(L(`표본이 부족합니다 (${r.samples}개, 30개 이상 필요). 세션이 더 쌓인 뒤 다시 실행하세요.`,
+      `not enough samples (${r.samples}, need 30+). Run again after more sessions.`));
+    process.exit(1);
+  }
+  const pct = (v) => Math.round(v * 100) + '%';
+  console.log(L(`표본 ${r.samples}개 (두 응답 사이에 도구 결과 하나만 들어온 구간)`, `${r.samples} samples (one tool result between two responses)`));
+  console.log(L(`ASCII ${(1 / r.coef.ascii).toFixed(2)}자/토큰 · 한글 ${r.coef.hangul.toFixed(2)}토큰/자 · 그 밖 ${r.coef.other.toFixed(2)}토큰/자 · 결과당 ${r.coef.perResult}`,
+    `ASCII ${(1 / r.coef.ascii).toFixed(2)} chars/token · Hangul ${r.coef.hangul.toFixed(2)} tokens/char · other ${r.coef.other.toFixed(2)} tokens/char · +${r.coef.perResult} per result`));
+  console.log(L(`글자 수 / 4 : 중앙 오차 ${pct(r.naive.median)} · 합계 비 ${r.naive.ratio.toFixed(2)}`, `chars / 4   : median error ${pct(r.naive.median)} · total ratio ${r.naive.ratio.toFixed(2)}`));
+  console.log(L(`맞춘 계수   : 중앙 오차 ${pct(r.fitted.median)} · 합계 비 ${r.fitted.ratio.toFixed(2)}`, `fitted      : median error ${pct(r.fitted.median)} · total ratio ${r.fitted.ratio.toFixed(2)}`));
+  if (flag('--dry-run')) process.exit(0);
+  console.log(L(`저장: ${save(r.coef, { samples: r.samples })}`, `saved: ${save(r.coef, { samples: r.samples })}`));
 } else if (cmd === 'export') {
   const { file, compactAt, title } = findSession();
   const { exportSession } = require('../lib/export');

@@ -85,3 +85,81 @@ describe('labelEn', () => {
     expect(labelEn(null, 'x')).toBe('x');
   });
 });
+
+describe('tokens · calibrate', () => {
+  const fs = require('fs');
+  const os = require('os');
+  const path = require('path');
+  const tokens = require('../lib/tokens');
+  const { fit, evaluate, calibrate, save, charClasses } = require('../lib/calibrate');
+
+  test('글자 종류별로 센다', () => {
+    expect(charClasses('ab한글é')).toEqual([2, 2, 1]);
+    const before = tokens.coefficients();
+    tokens.setCoefficients({ ascii: 0.5, hangul: 2, other: 1 });
+    expect(tokens.countText('abcd한글😀')).toBe(2 + 4 + 1);
+    tokens.setCoefficients(before);
+  });
+
+  test('계수 파일을 읽고, 깨진 파일은 기본값으로 돌아간다', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cb-tok-'));
+    const f = save({ ascii: 0.3, hangul: 1.2, other: 2, perResult: 10 }, { samples: 40 }, path.join(dir, 'a', 'tokens.json'));
+    expect(tokens.load(f)).toMatchObject({ ascii: 0.3, perResult: 10, source: f });
+    fs.writeFileSync(f, '{broken');
+    expect(tokens.load(f).source).toBe('default');
+  });
+
+  test('회귀는 알려진 계수를 되찾는다', () => {
+    const rows = [];
+    for (let i = 1; i <= 40; i++) {
+      const x = [i * 100, (i % 7) * 30, (i % 3) * 10];
+      rows.push({ x, y: 0.4 * x[0] + 1.5 * x[1] + 2 * x[2] + 30 });
+    }
+    const [a, h, o, d] = fit(rows);
+    expect(a).toBeCloseTo(0.4, 5);
+    expect(h).toBeCloseTo(1.5, 5);
+    expect(o).toBeCloseTo(2, 5);
+    expect(d).toBeCloseTo(30, 3);
+    expect(evaluate(rows, (x) => 0.4 * x[0] + 1.5 * x[1] + 2 * x[2] + 30)).toMatchObject({ median: 0, ratio: 1 });
+  });
+
+  test('세션 로그에서 표본을 뽑아 맞춘다', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cb-cal-'));
+    const file = path.join(dir, 's.jsonl');
+    const lines = [];
+    let ctx = 1000;
+    for (let i = 0; i < 40; i++) {
+      const text = 'a'.repeat(300 + i * 37) + '가'.repeat((i % 5) * 20);
+      lines.push({ type: 'assistant', message: { id: 'm' + i, usage: { input_tokens: ctx, output_tokens: 20 } } });
+      lines.push({ type: 'attachment', attachment: { type: 'hook_success' } });
+      lines.push({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 't' + i, content: text }] } });
+      ctx += 20 + Math.round((300 + i * 37) * 0.45 + (i % 5) * 20 * 1.5 + 30);
+    }
+    lines.push({ type: 'assistant', message: { id: 'end', usage: { input_tokens: ctx, output_tokens: 1 } } });
+    fs.writeFileSync(file, lines.map((l) => JSON.stringify(l)).join('\n'));
+    const r = calibrate([file]);
+    expect(r.samples).toBe(40);
+    expect(r.coef.ascii).toBeCloseTo(0.45, 2);
+    expect(r.coef.hangul).toBeCloseTo(1.5, 1);
+    expect(r.fitted.median).toBeLessThan(0.02);
+    expect(calibrate([]).coef).toBeUndefined();
+  });
+});
+
+describe('imageTokens', () => {
+  const t = require('../lib/tokens');
+  const im = require('./images.json');
+  test('PNG · JPEG · GIF · WebP 크기를 읽어 가로 × 세로 / 750 으로 센다', () => {
+    expect(t.imageSize(im.png)).toEqual([1600, 950]);
+    expect(t.imageSize(im.jpg)).toEqual([800, 600]);
+    expect(t.imageSize(im.gif)).toEqual([300, 200]);
+    expect(t.imageSize(im.webp)).toEqual([1024, 768]);
+    expect(t.imageTokens({ source: { data: im.png } })).toBe(2027);
+  });
+  test('크기를 못 읽으면 기본값', () => {
+    expect(t.imageSize('')).toBeNull();
+    expect(t.imageSize('AAAA')).toBeNull();
+    expect(t.imageTokens({ source: { data: 'AAAA' } })).toBe(t.coefficients().image);
+    expect(t.imageTokens(null)).toBe(t.coefficients().image);
+  });
+});

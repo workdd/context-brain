@@ -700,8 +700,8 @@ function renderBudget() {
     .map((g) => ({ ...g, value: g.items.reduce((s, n) => s + n.tokens, 0) })).filter((g) => g.value > 0);
   const est = groups.reduce((s, g) => s + g.value, 0);
   $('map-note').textContent = now
-    ? L(`추정 합계 ${kfmt(est)} / 실측 ${kfmt(now)}${now > est ? ` · 차이 ${kfmt(now - est)}는 도구 정의, 대화 틀, 한글 과소 추정처럼 로그로 셀 수 없는 부분` : ''}`,
-      `estimated ${kfmt(est)} / measured ${kfmt(now)}${now > est ? ` · the ${kfmt(now - est)} gap is what the log cannot see (tool definitions, message framing, under-counted non-English text)` : ''}`)
+    ? L(`추정 합계 ${kfmt(est)} / 실측 ${kfmt(now)}${now > est ? ` · 차이 ${kfmt(now - est)}는 도구 정의, 대화 틀처럼 로그로 셀 수 없는 부분` : ''}`,
+      `estimated ${kfmt(est)} / measured ${kfmt(now)}${now > est ? ` · the ${kfmt(now - est)} gap is what the log cannot see (tool definitions, message framing)` : ''}`)
     : '';
   const box = $('treemap');
   const W = box.clientWidth, H = box.clientHeight;
