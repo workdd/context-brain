@@ -6,7 +6,7 @@ import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 
-const { squarify, splitSentences, findRefs, wasteCandidates } = window.CBModel;
+const { squarify, splitSentences, findRefs, wasteCandidates, diagnose, describe } = window.CBModel;
 const { L, lang } = window.CBLang;
 
 // ════════════════════════════════════════════════════════════
@@ -44,18 +44,8 @@ const FLOW_MAX = 30;      // 보고 있는 턴에서 그리는 빛줄기 수
 let LOBE_NAMES = {};
 const LOBE_EN = { rules: 'Rules (CLAUDE.md)', system: 'System prompt', memory: 'Memory (hooks)', abilities: 'Tool list', dialog: 'Dialog',
   files: 'Files', shell: 'Shell', web: 'Web', agents: 'Subagents', skills: 'Skills', mcp: 'MCP', output: 'Response' };
-// 파서가 붙이는 고정 이름 · 설명 (한국어) 의 영어
-const LABEL_EN = { 'sys:prompt': 'System prompt', 'abil:skills': 'Skill list', 'abil:agents': 'Agent list', 'abil:deferred': 'Deferred tool names',
-  'out:thinking': 'Thinking', 'out:answer': 'Answer', 'web:search': 'Web search' };
+const labelOf = (e) => (lang === 'en' ? window.CBModel.labelEn(e.id, e.label) : e.label);
 const DETAIL_EN = { '스키마 로드': 'schema loaded', '스킬 본문 로드': 'skill body loaded', '답변에서 언급': 'named in the answer' };
-function labelOf(e) {
-  if (lang !== 'en' || !e.label) return e.label;
-  if (LABEL_EN[e.id]) return LABEL_EN[e.id];
-  if (e.id.startsWith('dlg:summary')) return 'Compaction summary';
-  if (e.id.startsWith('abil:mcp:')) return e.label.replace(/ 안내$/, ' instructions');
-  if (/^입력 #\d+$/.test(e.label)) return e.label.replace('입력', 'Prompt');
-  return e.label === '(입력)' ? '(prompt)' : e.label;
-}
 const detailOf = (d) => (lang === 'en' && DETAIL_EN[d]) || d;
 
 const $ = (id) => document.getElementById(id);
@@ -649,7 +639,39 @@ function renderRing(now) {
       ${compactAt ? `<circle cx="22" cy="22" r="17" fill="none" stroke="${color}" stroke-width="5" stroke-linecap="round"
         stroke-dasharray="${(C * r).toFixed(1)} ${C.toFixed(1)}" transform="rotate(-90 22 22)"/>` : ''}
       <text x="22" y="26" text-anchor="middle" font-size="11" fill="#e3e9f5">${compactAt ? Math.round(r * 100) + '%' : '?'}</text></svg>
-    <div><b>${kfmt(now)} ${L('토큰', 'tokens')}</b>${compactAt ? L(`압축까지 약 ${kfmt(Math.max(0, compactAt - now))}`, `~${kfmt(Math.max(0, compactAt - now))} until compaction`) : L('압축 기준 미관측', 'compaction point unknown')}</div>`;
+    <div><b>${kfmt(now)} ${L('토큰', 'tokens')}</b>${compactAt ? L(`압축까지 약 ${kfmt(Math.max(0, compactAt - now))}`, `~${kfmt(Math.max(0, compactAt - now))} until compaction`) : L('압축 기준 미관측', 'compaction point unknown')}
+      ${report && report.reclaim ? `<a class="reclaim" href="#doctor">${L(`되찾을 수 있는 양 약 ${kfmt(report.reclaim)}`, `~${kfmt(report.reclaim)} reclaimable`)}</a>` : ''}</div>`;
+}
+
+// ════════════════════════════════════════════════════════════
+// 화면: 컨텍스트 진단 (뇌 아래 첫 카드)
+// ════════════════════════════════════════════════════════════
+let report = null;
+const SEV_LABEL = { high: L('높음', 'High'), mid: L('중간', 'Medium'), low: L('낮음', 'Low') };
+function renderDoctor() {
+  report = diagnose(allEvents.slice(0, player.i), { compactAt });
+  const box = $('doctor-body');
+  if (!report.findings.length) {
+    box.innerHTML = `<div class="empty">${L('아직 고칠 것이 없습니다', 'Nothing to fix yet')}</div>`;
+    return;
+  }
+  const pct = report.context && compactAt ? Math.round((report.context / compactAt) * 100) : null;
+  const head = `<div class="doc-head"><div><b>${kfmt(report.reclaim)}</b><span>${L('지금 되찾을 수 있는 토큰', 'tokens reclaimable now')}</span></div>
+    <div><b>${report.findings.length}</b><span>${L('진단', 'findings')}</span></div>
+    ${pct != null ? `<div><b>${pct}%</b><span>${L('압축 기준까지 찬 정도', 'of the compaction point')}</span></div>` : ''}</div>`;
+  const cards = report.findings.map((f0) => {
+    const f = lang === 'en' ? { ...f0, items: f0.items.map((i) => ({ ...i, label: window.CBModel.labelEn(i.id, i.label) })) } : f0;
+    const d = describe(f, L);
+    const chips = f.items.slice(0, 6).map((i) => {
+      const label = i.label;
+      const n = i.count > 1 ? (f.type === 'dead-weight' ? L(` · ${i.count}턴`, ` · ${i.count} turns`) : ` ×${i.count}`) : '';
+      return `<span class="chip"${neurons.has(i.id) ? ` data-id="${escapeHtml(i.id)}"` : ''}>${escapeHtml(short(label, 34))} <em>${kfmt(i.tokens)}${n}</em></span>`;
+    }).join('');
+    const more = f.items.length > 6 ? `<span class="chip more-chip">+${f.items.length - 6}</span>` : '';
+    return `<li class="doc ${f.severity}"><div class="doc-title"><span class="sev">${SEV_LABEL[f.severity]}</span>${escapeHtml(d.title)}</div>
+      <div class="doc-fix">${escapeHtml(d.fix)}</div>${chips || more ? `<div class="flow">${chips}${more}</div>` : ''}</li>`;
+  }).join('');
+  box.innerHTML = head + `<ol class="docs">${cards}</ol>`;
 }
 
 function renderBudget() {
@@ -874,6 +896,7 @@ function scheduleRender() {
   if (renderTimer) return;
   renderTimer = setTimeout(() => {
     renderTimer = null;
+    renderDoctor();        // 링이 되찾을 양을 보여 주므로 예산보다 먼저
     renderBudget();        // 낭비 후보를 먼저 계산해야 뇌가 붉게 칠할 수 있다
     brain.refresh();
     renderTimeline();

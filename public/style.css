@@ -196,3 +196,23 @@ body.static #lang { margin-left: auto; }
 @media (max-width: 1100px) { #key { display: none; } }
 @media (max-width: 640px) { .export-box { display: none; } #play-time { display: none; } }
 #key b { font-weight: 400; }
+
+/* 컨텍스트 진단 */
+.doc-head { display: flex; gap: 28px; margin-bottom: 12px; }
+.doc-head div { display: flex; flex-direction: column; }
+.doc-head b { font-size: 22px; font-variant-numeric: tabular-nums; }
+.doc-head div:first-child b { color: var(--good); }
+.doc-head span { font-size: 11px; color: var(--dim); }
+.docs { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 10px; }
+.doc { background: var(--card2); border: 1px solid var(--line); border-left: 3px solid #7dd3ff; border-radius: 8px; padding: 10px 12px; }
+.doc.high { border-left-color: var(--bad); }
+.doc.mid { border-left-color: var(--warn); }
+.doc-title { font-weight: 600; display: flex; gap: 8px; align-items: baseline; }
+.doc .sev { font-size: 10px; font-weight: 600; padding: 1px 6px; border-radius: 4px; background: rgba(125, 211, 255, 0.15); color: #7dd3ff; white-space: nowrap; }
+.doc.high .sev { background: rgba(255, 138, 138, 0.15); color: var(--bad); }
+.doc.mid .sev { background: rgba(255, 199, 107, 0.15); color: var(--warn); }
+.doc-fix { font-size: 12px; color: var(--dim); margin: 4px 0 8px; }
+.doc .chip[data-id] { cursor: pointer; }
+#ring .reclaim { display: block; color: var(--good); text-decoration: none; margin-top: 2px; }
+#doctor { scroll-margin-top: 60px; }
+.doc .chip { white-space: nowrap; max-width: 100%; overflow: hidden; }
