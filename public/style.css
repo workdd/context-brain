@@ -54,7 +54,7 @@ main { padding: 16px 20px 40px; display: flex; flex-direction: column; gap: 16px
 #turns { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
 .turn { border: 1px solid var(--line); border-radius: 10px; background: var(--card2); }
 .turn.viewing { border-color: rgba(125, 211, 255, 0.6); }
-.turn-head { display: grid; grid-template-columns: 56px 1fr auto; gap: 12px; align-items: center; padding: 8px 12px; cursor: pointer; }
+.turn-head { display: grid; grid-template-columns: 56px 1fr auto; gap: 12px; align-items: center; padding: 8px 12px; }
 .turn-head svg { display: block; }
 .turn-title { min-width: 0; }
 .turn-title .no { font-size: 11px; color: var(--dim); margin-right: 6px; }
@@ -222,3 +222,4 @@ body.static #project { display: none; }
 @media (max-width: 900px) { .psessions li { grid-template-columns: 1fr; gap: 2px; } }
 .tip .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
 .tip em { color: var(--text); font-style: normal; }
+.turn .compact-row { margin: 0 12px 10px; }

@@ -89,8 +89,6 @@ let curModel = null;
 let viewTurn = null;       // 사용자가 고른 턴 번호. null 이면 지금 턴
 let selected = null;       // { n } 또는 { lobe }
 let wasteIds = new Set();
-const openTurns = new Set();
-const closedTurns = new Set();
 const showAll = new Set();
 
 const curTurn = () => turns[turns.length - 1] || null;
@@ -613,20 +611,12 @@ function setViewTurn(no) {
   scheduleRender();
 }
 
-// 클릭 위임: data-id 는 뉴런, data-turn 은 턴
+// 클릭 위임: data-id 는 뉴런, data-more 는 답변 전체 보기
 document.addEventListener('click', (ev) => {
   const t = ev.target.closest('[data-id]');
   if (t && neurons.has(t.dataset.id)) { select(neurons.get(t.dataset.id)); return; }
   const more = ev.target.closest('[data-more]');
   if (more) { const no = Number(more.dataset.more); showAll.has(no) ? showAll.delete(no) : showAll.add(no); scheduleRender(); return; }
-  const view = ev.target.closest('[data-view]');
-  if (view) { setViewTurn(Number(view.dataset.view)); $('brainbox').scrollIntoView({ behavior: 'smooth' }); return; }
-  const head = ev.target.closest('[data-turn]');
-  if (head) {
-    const no = Number(head.dataset.turn);
-    if (isOpen(no)) { closedTurns.add(no); openTurns.delete(no); } else { openTurns.add(no); closedTurns.delete(no); }
-    scheduleRender();
-  }
 });
 document.addEventListener('mouseover', (ev) => {
   const t = ev.target.closest('[data-id]');
@@ -795,10 +785,8 @@ function tileHtml(r, cls, id, name, val, color) {
 
 
 // ════════════════════════════════════════════════════════════
-// 화면: 턴 타임라인
+// 화면: 보고 있는 턴 (뇌 · 히스토리 띠 · ◀ ▶ 가 고른 턴 하나)
 // ════════════════════════════════════════════════════════════
-const isOpen = (no) => openTurns.has(no) || (no === turns.length && !closedTurns.has(no));
-
 // 옆에서 본 작은 뇌. 그 턴에 쓰인 영역만 색을 칠한다
 function miniBrain(tr) {
   const used = {};
@@ -831,53 +819,37 @@ function turnHtml(tr) {
   const sum = lobeNames.filter((l) => byLobe[l]).map((l) => `<span><i class="dot" style="background:${hex(LOBE_META[l].color)}"></i> ${lobeName(l)} ${byLobe[l]}</span>`).join('');
   const state = tr.done ? `<span class="state done">${L(`완료 ${(tr.ms / 1000).toFixed(1)}초`, `done in ${(tr.ms / 1000).toFixed(1)}s`)}</span>`
     : tr.n === turns.length ? `<span class="state live">${L('진행 중', 'running')}</span>` : `<span class="state">${L('기록 없음', 'no record')}</span>`;
-  const viewing = vt() === tr.n;
-  let body = '';
-  if (isOpen(tr.n)) {
-    const flow = tr.steps.map((s) => {
-      const n = neurons.get(s.id);
-      return chip(n, s.tokens ? `<em>${kfmt(s.tokens)}</em>` : '', s.error ? 'err' : '');
-    }).join('<span class="arrow">→</span>');
-    // 답변 문장마다 이름이 그대로 나온 근거를 붙인다. 이 턴과 그 전에 다룬 항목이 후보
-    const cands = [...neurons.values()].filter((n) => n.lobe !== 'output' && n.lobe !== 'dialog' && [...n.turns].some((t) => t <= tr.n));
-    const rows = tr.answers.flatMap(splitSentences).map((s) => ({ s, refs: findRefs(s, cands) }));
-    const all = showAll.has(tr.n);
-    const shown = all ? rows : rows.slice(0, ANSWER_LINES);
-    const hits = rows.filter((r) => r.refs.length).length;
-    const answer = rows.length ? `<ul class="answer">${shown.map((r) => `<li class="${r.refs.length ? 'hit' : ''}"><span class="s">${escapeHtml(r.s)}</span>
-        ${r.refs.length ? `<span class="refs">${r.refs.map((id) => chip(neurons.get(id))).join('')}</span>` : ''}</li>`).join('')}</ul>
-      ${rows.length > ANSWER_LINES ? `<button class="more" data-more="${tr.n}">${all ? L('접기', 'collapse') : L(`전체 ${rows.length}문장 보기`, `show all ${rows.length} sentences`)}</button>` : ''}`
-      : `<div class="empty">${L('아직 답변이 없습니다', 'no answer yet')}</div>`;
-    const standing = STANDING.map((l) => {
-      let c = 0, t = 0;
-      for (const n of neurons.values()) if (n.lobe === l && !n.compacted) { c++; t += n.tokens; }
-      return c ? `<span class="chip"><i class="dot" style="background:${hex(LOBE_META[l].color)}"></i>${lobeName(l)} ${L(`${c}개`, `×${c}`)} <em>${kfmt(t)}</em></span>` : '';
-    }).join('');
-    body = `<div class="turn-body">
+  const flow = tr.steps.map((s) => {
+    const n = neurons.get(s.id);
+    return chip(n, s.tokens ? `<em>${kfmt(s.tokens)}</em>` : '', s.error ? 'err' : '');
+  }).join('<span class="arrow">→</span>');
+  // 답변 문장마다 이름이 그대로 나온 근거를 붙인다. 이 턴과 그 전에 다룬 항목이 후보
+  const cands = [...neurons.values()].filter((n) => n.lobe !== 'output' && n.lobe !== 'dialog' && [...n.turns].some((t) => t <= tr.n));
+  const rows = tr.answers.flatMap(splitSentences).map((s) => ({ s, refs: findRefs(s, cands) }));
+  const all = showAll.has(tr.n);
+  const shown = all ? rows : rows.slice(0, ANSWER_LINES);
+  const hits = rows.filter((r) => r.refs.length).length;
+  const answer = rows.length ? `<ul class="answer">${shown.map((r) => `<li class="${r.refs.length ? 'hit' : ''}"><span class="s">${escapeHtml(r.s)}</span>
+      ${r.refs.length ? `<span class="refs">${r.refs.map((id) => chip(neurons.get(id))).join('')}</span>` : ''}</li>`).join('')}</ul>
+    ${rows.length > ANSWER_LINES ? `<button class="more" data-more="${tr.n}">${all ? L('접기', 'collapse') : L(`전체 ${rows.length}문장 보기`, `show all ${rows.length} sentences`)}</button>` : ''}`
+    : `<div class="empty">${L('아직 답변이 없습니다', 'no answer yet')}</div>`;
+  const cut = compactions.filter((c) => c.afterTurn === tr.n).map((c) =>
+    `<div class="compact-row">${L(`이 턴 뒤 압축 · 직전 ${fmt(c.tokens)} 토큰. 파일 · 셸 · 웹 결과가 컨텍스트에서 빠졌습니다`, `Compacted after this turn at ${fmt(c.tokens)} tokens. File, shell and web results left the context`)}</div>`).join('');
+  return `<div class="turn viewing">
+    <div class="turn-head">${miniBrain(tr)}
+      <div class="turn-title"><span class="prompt"><span class="no">#${tr.n}</span>${escapeHtml(tr.prompt)}</span><span class="sum">${sum || L('도구 사용 없음', 'no tools')}</span></div>
+      <div class="turn-meta">${state}<br>${clock2(tr.t)} · +${kfmt(tr.added)}${tr.ctxEnd ? ` · ${L('컨텍스트', 'context')} ${kfmt(tr.ctxEnd)}` : ''}</div>
+    </div>
+    <div class="turn-body">
       <div class="sec"><div class="sec-label">${L('흐름 (도구 호출 순서 · 숫자 = 결과로 들어온 토큰)', 'Flow (tool calls in order · number = tokens returned)')}</div>
         <div class="flow">${flow || `<span class="empty">${L('도구를 쓰지 않았습니다', 'no tools used')}</span>`}</div></div>
       <div class="sec"><div class="sec-label">${L('답변과 근거', 'Answer and evidence')} ${rows.length ? L(`· ${rows.length}문장 중 ${hits}문장에 근거 이름이 나옴`, `· ${hits} of ${rows.length} sentences name a source`) : ''}</div>${answer}</div>
-      <div class="sec"><div class="sec-label">${L('늘 실려 있던 것', 'Always loaded')}</div><div class="flow">${standing}</div></div>
-      <div class="sec">${viewing ? `<span class="empty">${L('위 뇌가 이 턴을 보여 주고 있습니다', 'the brain above is showing this turn')}</span>` : `<button class="btn" data-view="${tr.n}">${L('이 턴을 뇌에서 보기', 'Show this turn in the brain')}</button>`}</div>
-    </div>`;
-  }
-  return `<li class="turn ${viewing ? 'viewing' : ''}">
-    <div class="turn-head" data-turn="${tr.n}">${miniBrain(tr)}
-      <div class="turn-title"><span class="prompt"><span class="no">#${tr.n}</span>${escapeHtml(tr.prompt)}</span><span class="sum">${sum || L('도구 사용 없음', 'no tools')}</span></div>
-      <div class="turn-meta">${state}<br>${clock2(tr.t)} · +${kfmt(tr.added)}${tr.ctxEnd ? ` · ${L('컨텍스트', 'context')} ${kfmt(tr.ctxEnd)}` : ''}</div>
-    </div>${body}</li>`;
+    </div>${cut}</div>`;
 }
 
 function renderTimeline() {
-  if (!turns.length) { $('turns').innerHTML = `<li class="empty">${L('아직 사용자 입력이 없습니다', 'no prompts yet')}</li>`; return; }
-  let html = '';
-  for (let i = turns.length - 1; i >= 0; i--) {
-    for (const c of compactions.filter((x) => x.afterTurn === i + 1)) {
-      html += `<li class="compact-row">${L(`압축 · 직전 ${fmt(c.tokens)} 토큰. 이 아래 턴들의 파일 · 셸 · 웹 결과는 컨텍스트에서 빠졌습니다`, `Compaction at ${fmt(c.tokens)} tokens. File, shell and web results from the turns below left the context`)}</li>`;
-    }
-    html += turnHtml(turns[i]);
-  }
-  $('turns').innerHTML = html;
+  const tr = turns[vt() - 1];
+  $('turns').innerHTML = tr ? turnHtml(tr) : `<div class="empty">${L('아직 사용자 입력이 없습니다', 'no prompts yet')}</div>`;
 }
 
 function renderTurnLabel() {
@@ -1156,7 +1128,7 @@ function reset() {
   selected = null;
   viewTurn = null;
   wasteIds = new Set();
-  openTurns.clear(); closedTurns.clear(); showAll.clear();
+  showAll.clear();
   renderDetail();
 }
 

@@ -76,10 +76,9 @@
     <div id="doctor-body"></div>
   </section>
 
-  <section id="project" class="card">
-    <div class="card-head"><h2 data-en="Project doctor">프로젝트 진단</h2><span class="hint" data-en="Repeated leaks across this project's recent sessions. Click a session bar to open it">이 프로젝트의 최근 세션들에서 반복되는 낭비. 세션 막대를 누르면 그 세션으로 이동합니다</span>
-      <button id="project-run" type="button" data-en="Analyze recent sessions">최근 세션 분석</button></div>
-    <div id="project-body"><div class="empty" data-en="Reads the project's 20 most recent sessions (about a second).">프로젝트의 최근 세션 20개를 읽습니다 (1초 안팎).</div></div>
+  <section id="timeline" class="card">
+    <div class="card-head"><h2 data-en="This turn">이 턴</h2><span class="hint" data-en="The turn the brain is showing. Pick another with ◀ ▶ or the history strip. Chips next to a sentence are the items it names">뇌가 보여 주는 턴입니다. ◀ ▶ 나 히스토리 띠로 다른 턴을 고릅니다. 문장 옆 칩은 그 문장에 이름이 나온 항목입니다</span></div>
+    <div id="turns"></div>
   </section>
 
   <section id="budget" class="card">
@@ -88,9 +87,10 @@
     <div id="treemap"></div>
   </section>
 
-  <section id="timeline" class="card">
-    <div class="card-head"><h2 data-en="Turn timeline">턴 타임라인</h2><span class="hint" data-en="prompt → tool calls → answer. Chips next to an answer sentence are the items it names">입력 → 도구 호출 → 답변. 답변 문장 옆 칩은 그 문장에 이름이 나온 근거입니다</span></div>
-    <ol id="turns"></ol>
+  <section id="project" class="card">
+    <div class="card-head"><h2 data-en="Project doctor">프로젝트 진단</h2><span class="hint" data-en="Repeated leaks across this project's recent sessions. Click a session bar to open it">이 프로젝트의 최근 세션들에서 반복되는 낭비. 세션 막대를 누르면 그 세션으로 이동합니다</span>
+      <button id="project-run" type="button" data-en="Analyze recent sessions">최근 세션 분석</button></div>
+    <div id="project-body"><div class="empty" data-en="Reads the project's 20 most recent sessions (about a second).">프로젝트의 최근 세션 20개를 읽습니다 (1초 안팎).</div></div>
   </section>
 </main>
 
