@@ -58,10 +58,12 @@ describe('exportSession', () => {
     const file = demoFile();
     expect(sessionTitle(file)).toBe('데모 제목');
     expect(sessionTitle(file + '.none')).toBeNull();
-    const d = dataOf(exportSession(file, { title: sessionTitle(file), compactAt: 60000 }));
+    const byModel = { 'claude-demo': { n: 2, min: 60000, max: 62000, median: 62000 } };
+    const d = dataOf(exportSession(file, { title: sessionTitle(file), byModel }));
     expect(d.events.length).toBe(parseFile(file).length);
     expect(d.events.filter((e) => e.kind === 'turn_end')).toHaveLength(3);
     expect(d.compactAt).toBe(60000);
+    expect(d.compactRange).toEqual([60000, 62000]);
     const r = dataOf(exportSession(file, { redact: true }));
     expect(r.events.some((e) => e.text || e.preview)).toBe(false);
     expect(r.events.some((e) => e.kind === 'ref')).toBe(true); // 근거는 언급 기록으로 남는다

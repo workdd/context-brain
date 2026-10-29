@@ -54,18 +54,19 @@ if (flag('-h') || flag('--help') || cmd === 'help') {
   if (!noOpen) process.env.CB_OPEN = '1';
   require('../scripts/demo.js');
 } else if (cmd === 'doctor' && flag('--project')) {
-  const { file, compactAt } = findSession();
+  const { file, byModel } = findSession();
   const { projectSessions } = require('../lib/project');
   const { projectReport, describeProject, labelEn } = require('../public/model.js');
-  const report = projectReport(projectSessions(file, Number(value('--limit')) || 20), { compactAt });
+  const report = projectReport(projectSessions(file, Number(value('--limit')) || 20), { byModel });
   if (!ko) for (const f of report.findings) for (const i of f.items) i.label = labelEn(i.id, i.label);
   if (flag('--json')) console.log(JSON.stringify({ project: path.basename(path.dirname(file)), ...report }, null, 2));
   else printProject(report, path.basename(path.dirname(file)), describeProject);
 } else if (cmd === 'doctor') {
-  const { file, compactAt, title } = findSession();
+  const { file, byModel, title } = findSession();
   const { parseFile } = require('../lib/export');
-  const { diagnose, describe, labelEn } = require('../public/model.js');
-  const report = diagnose(parseFile(file), { compactAt });
+  const { diagnose, describe, labelEn, pickCompact, lastModel } = require('../public/model.js');
+  const events = parseFile(file);
+  const report = diagnose(events, { compactAt: pickCompact(byModel, lastModel(events)).at });
   if (!ko) for (const f of report.findings) for (const i of f.items) i.label = labelEn(i.id, i.label);
   if (flag('--json')) console.log(JSON.stringify({ file, title, ...report }, null, 2));
   else printReport(report, title || path.basename(file), describe);
@@ -95,11 +96,11 @@ if (flag('-h') || flag('--help') || cmd === 'help') {
   if (flag('--dry-run')) process.exit(0);
   console.log(L(`저장: ${save(r.coef, { samples: r.samples })}`, `saved: ${save(r.coef, { samples: r.samples })}`));
 } else if (cmd === 'export') {
-  const { file, compactAt, title } = findSession();
+  const { file, byModel, title } = findSession();
   const { exportSession } = require('../lib/export');
   const redact = flag('--redact');
   const out = value('-o') || `context-brain-${path.basename(file, '.jsonl').slice(0, 8)}${redact ? '-redacted' : ''}.html`;
-  fs.writeFileSync(out, exportSession(file, { redact, title, compactAt }));
+  fs.writeFileSync(out, exportSession(file, { redact, title, byModel }));
   console.log(`${L('저장', 'saved')}: ${path.resolve(out)} (${Math.round(fs.statSync(out).size / 1024)} KB${redact ? L(', 내용 가림', ', redacted') : ''})`);
   if (!redact) console.log(L('주의: 파일 내용 미리보기 · 명령 · 답변 본문이 들어 있습니다. 남에게 줄 때는 --redact 를 쓰세요.', 'note: this file contains output previews, commands and answer text. Use --redact before sharing it.'));
 } else if (cmd === 'start') {
@@ -121,8 +122,8 @@ function findSession() {
     console.error(L(`세션을 찾지 못했습니다: ${arg}`, `session not found: ${arg}`));
     process.exit(1);
   }
-  const { compactAt } = observedCompactAt(listSessions(undefined, 40).map((s) => s.file));
-  return { file, compactAt, title: sessionTitle(file) };
+  const { byModel } = observedCompactAt(listSessions(undefined, 40).map((s) => s.file));
+  return { file, byModel, title: sessionTitle(file) };
 }
 
 function printReport(r, title, describe) {
@@ -149,24 +150,25 @@ function printReport(r, title, describe) {
   }
 }
 
-// 상태줄은 자주 불리므로 압축 기준은 10분 동안 임시 파일에 담아 둔다
-function cachedCompactAt() {
+// 상태줄은 자주 불리므로 모델별 압축 크기는 10분 동안 임시 파일에 담아 둔다
+function cachedByModel() {
   const os = require('os');
-  const cache = path.join(os.tmpdir(), 'context-brain-compact-at.json');
+  const cache = path.join(os.tmpdir(), 'context-brain-compact.json');
   try {
     const c = JSON.parse(fs.readFileSync(cache, 'utf8'));
-    if (Date.now() - c.at < 10 * 60 * 1000) return c.compactAt;
+    if (Date.now() - c.at < 10 * 60 * 1000 && c.byModel) return c.byModel;
   } catch (_) { /* 처음이거나 깨졌으면 다시 센다 */ }
   const { listSessions, observedCompactAt } = require('../lib/sessions');
-  const { compactAt } = observedCompactAt(listSessions(undefined, 40).map((s) => s.file));
-  try { fs.writeFileSync(cache, JSON.stringify({ at: Date.now(), compactAt })); } catch (_) { /* 캐시 없이 진행 */ }
-  return compactAt;
+  const { byModel } = observedCompactAt(listSessions(undefined, 40).map((s) => s.file));
+  try { fs.writeFileSync(cache, JSON.stringify({ at: Date.now(), byModel })); } catch (_) { /* 캐시 없이 진행 */ }
+  return byModel;
 }
 
 function statusLine(file) {
   const { parseFile } = require('../lib/export');
-  const { diagnose } = require('../public/model.js');
-  const r = diagnose(parseFile(file), { compactAt: cachedCompactAt() });
+  const { diagnose, pickCompact, lastModel } = require('../public/model.js');
+  const events = parseFile(file);
+  const r = diagnose(events, { compactAt: pickCompact(cachedByModel(), lastModel(events)).at });
   const k = (n) => (n >= 1000 ? Math.round(n / 1000) + 'k' : String(Math.round(n || 0)));
   const parts = [`ctx ${r.context == null ? '-' : k(r.context)}${r.compactAt && r.context ? ` (${Math.round((r.context / r.compactAt) * 100)}%)` : ''}`];
   if (r.reclaim) parts.push(L(`되찾을 양 ${k(r.reclaim)}`, `reclaim ${k(r.reclaim)}`));

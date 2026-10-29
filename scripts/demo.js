@@ -17,12 +17,12 @@ const { demoSession } = require('../lib/demo');
 const { boot, turns } = demoSession(undefined, lang);
 
 // 프로젝트 진단에 보이도록 같은 프로젝트의 지난 세션 두 개를 남긴다.
-// 압축 기준은 최근 세션에서 실제로 압축이 일어난 크기로 잡으므로 첫 세션 끝에 압축 기록을 둔다
+// 압축 기준은 같은 모델의 지난 자동 압축 크기로 잡으므로 두 세션 끝에 압축 기록을 둔다
 [1, 2].forEach((daysAgo) => {
   const at = Date.now() - daysAgo * 86400000;
   const old = demoSession(at, lang);
   const lines = [...old.boot, ...old.turns.flat(2), { type: 'ai-title', aiTitle: lang === 'ko' ? `지난 작업 ${daysAgo}` : `Earlier work ${daysAgo}` }];
-  if (daysAgo === 1) lines.push({ type: 'system', subtype: 'compact_boundary', compactMetadata: { trigger: 'auto', preTokens: 60000 } });
+  lines.push({ type: 'system', subtype: 'compact_boundary', compactMetadata: { trigger: 'auto', preTokens: 59000 + daysAgo * 1000 } });
   const f = path.join(dir, `earlier-${daysAgo}.jsonl`);
   fs.writeFileSync(f, lines.map((e) => JSON.stringify(e)).join('\n') + '\n');
   fs.utimesSync(f, new Date(at), new Date(at));

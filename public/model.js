@@ -259,14 +259,14 @@
   const READ_LIKE = new Set(['cat', 'sed', 'head', 'tail', 'awk', 'less', 'nl', 'bat', 'wc', 'grep', 'rg', 'ls', 'find', 'jq']);
 
   function projectReport(sessions, opts) {
-    const o = Object.assign({ compactAt: null }, opts || {});
+    const o = Object.assign({ byModel: null }, opts || {});
     const mcp = new Map();       // server → { loaded, called, tokens }
     const files = new Map();     // file id → { label, sessions: Set, reads, tokens }
     const shell = new Map();     // program → { calls, tokens, sessions: Set }
     const standing = new Map();  // id → { label, sessions, tokens }
     const rows = [];
     for (const s of sessions) {
-      const r = diagnose(s.events, o);
+      const r = diagnose(s.events, { compactAt: pickCompact(o.byModel, lastModel(s.events)).at });
       const cmd = new Map();
       const loadedMcp = new Set();
       const calledMcp = new Set();
@@ -431,6 +431,20 @@
     return picked.sort((a, b) => a.k - b.k);
   }
 
-  return { squarify, splitSentences, needlesOf, findRefs, diagnose, describe, labelEn, projectReport, describeProject, shellProgramOf,
+  // ── 압축 기준 ─────────────────────────────────────────────
+  // byModel: { 모델: { n, min, max, median } } (자동 압축만). 같은 모델의 값이 25% 안에 모일 때만 기준 하나로 쓴다.
+  // 흩어져 있으면 기준 없이 범위만 돌려준다 (컨텍스트 창 설정이 세션마다 다를 수 있다)
+  function pickCompact(byModel, model) {
+    const b = byModel && model && byModel[model];
+    if (!b) return { at: null, range: null, n: 0 };
+    const tight = b.n >= 2 && b.max <= b.min * 1.25;
+    return { at: tight ? b.min : null, range: [b.min, b.max], n: b.n };
+  }
+  function lastModel(events) {
+    for (let k = events.length - 1; k >= 0; k--) if (events[k].kind === 'usage' && events[k].model) return events[k].model;
+    return null;
+  }
+
+  return { squarify, splitSentences, needlesOf, findRefs, pickCompact, lastModel, diagnose, describe, labelEn, projectReport, describeProject, shellProgramOf,
     contextSeries, growthSpikes };
 });

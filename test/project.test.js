@@ -22,7 +22,7 @@ describe('projectReport', () => {
     session(2, [...sh('sh:d', 'npm run test', 6000), read('src/app.ts', 2000), { kind: 'compact', tokens: 1 },
       ...sh('sh:e', 'sed -n 1,400p big.ts', 9000), ...sh('sh:f', 'sed -n 1,400p big.ts', 9000)]),
   ];
-  const r = projectReport(sessions, { compactAt: 100000 });
+  const r = projectReport(sessions, { byModel: {} });
   const find = (t) => r.findings.find((f) => f.type === t);
 
   test('여러 세션에 실렸는데 안 부른 MCP 서버만 높음으로 잡는다', () => {

@@ -64,6 +64,22 @@ describe('diagnose', () => {
   });
 });
 
+describe('pickCompact · lastModel', () => {
+  const { pickCompact, lastModel } = require('../public/model.js');
+  test('값이 25% 안에 모일 때만 기준, 흩어지면 범위만', () => {
+    const byModel = { a: { n: 3, min: 190000, max: 200000, median: 195000 }, b: { n: 5, min: 200000, max: 970000, median: 330000 }, c: { n: 1, min: 5, max: 5, median: 5 } };
+    expect(pickCompact(byModel, 'a')).toEqual({ at: 190000, range: [190000, 200000], n: 3 });
+    expect(pickCompact(byModel, 'b')).toEqual({ at: null, range: [200000, 970000], n: 5 });
+    expect(pickCompact(byModel, 'c').at).toBeNull();
+    expect(pickCompact(byModel, 'z')).toEqual({ at: null, range: null, n: 0 });
+    expect(pickCompact(null, 'a').at).toBeNull();
+  });
+  test('마지막 사용량 기록의 모델', () => {
+    expect(lastModel([{ kind: 'usage', model: 'm1' }, { kind: 'use' }, { kind: 'usage', model: 'm2' }, { kind: 'usage' }])).toBe('m2');
+    expect(lastModel([])).toBeNull();
+  });
+});
+
 describe('describe', () => {
   test('모든 진단 종류에 한국어 · 영어 문장이 있다', () => {
     const types = ['reread', 'big-output', 'dead-weight', 'unused-mcp', 'unused-schema', 'errors', 'standing', 'near-compact'];

@@ -75,12 +75,18 @@ describe('sessions', () => {
 });
 
 describe('observedCompactAt', () => {
-  test('압축 직전 크기 중 최댓값과 표본 수', () => {
+  test('자동 압축만 모델별로 모은다 (수동 /compact 는 뺀다)', () => {
     const a = path.join(dir, 'a.jsonl');
     const b = path.join(dir, 'b.jsonl');
-    fs.writeFileSync(a, '{"type":"system","subtype":"compact_boundary","compactMetadata":{"trigger":"auto","preTokens":1200}}\n{"type":"user"}\n');
-    fs.writeFileSync(b, '{"type":"system","subtype":"compact_boundary","compactMetadata":{"preTokens":3400}}\n');
-    expect(observedCompactAt([a, b, path.join(dir, 'none')])).toEqual({ compactAt: 3400, samples: 2 });
-    expect(observedCompactAt([])).toEqual({ compactAt: null, samples: 0 });
+    const asst = (model) => JSON.stringify({ type: 'assistant', message: { model, usage: {} } });
+    const cmp = (trigger, pre) => JSON.stringify({ type: 'system', subtype: 'compact_boundary', compactMetadata: { trigger, preTokens: pre } });
+    fs.writeFileSync(a, [asst('claude-x'), cmp('auto', 1200), asst('claude-y'), cmp('auto', 5000), cmp('manual', 9000)].join('\n') + '\n');
+    fs.writeFileSync(b, [asst('claude-x'), cmp('auto', 1400), cmp('auto', 0)].join('\n') + '\n');
+    fs.writeFileSync(path.join(dir, 'c.jsonl'), cmp('auto', 700) + '\n');
+    expect(observedCompactAt([a, b, path.join(dir, 'c.jsonl'), path.join(dir, 'none')])).toEqual({
+      byModel: { 'claude-x': { n: 2, min: 1200, max: 1400, median: 1400 }, 'claude-y': { n: 1, min: 5000, max: 5000, median: 5000 }, '?': { n: 1, min: 700, max: 700, median: 700 } },
+      samples: 4,
+    });
+    expect(observedCompactAt([])).toEqual({ byModel: {}, samples: 0 });
   });
 });

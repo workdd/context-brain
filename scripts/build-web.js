@@ -19,5 +19,5 @@ fs.rmSync(tmp, { recursive: true, force: true });
 const titles = { ko: '데모: 401 버그 · 주문 API 병목 · 배포 점검', en: 'Demo: 401 bug · slow orders API · release check' };
 const out = path.join(__dirname, '..', 'web', 'index.html');
 fs.mkdirSync(path.dirname(out), { recursive: true });
-fs.writeFileSync(out, buildHtml({ title: 'Live demo', titles, compactAt: 60000, autoplay: true, events: variants.en, variants }));
+fs.writeFileSync(out, buildHtml({ title: 'Live demo', titles, compactAt: 60000, compactRange: [60000, 60000], compactN: 1, autoplay: true, events: variants.en, variants }));
 console.log(`web demo: ${out}`);

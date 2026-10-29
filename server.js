@@ -65,14 +65,14 @@ const server = http.createServer((req, res) => {
     const file = resolveFile(url.searchParams.get('file'));
     if (!file) return sendJson(res, 404, { error: 'session not found' });
     const sessions = projectSessions(file, Number(url.searchParams.get('limit')) || 20);
-    const report = projectReport(sessions, { compactAt: getLimits().compactAt });
+    const report = projectReport(sessions, { byModel: getLimits().byModel });
     return sendJson(res, 200, { project: path.basename(path.dirname(file)), ...report });
   }
   if (url.pathname === '/api/export') {
     const file = resolveFile(url.searchParams.get('file'));
     if (!file) return sendJson(res, 404, { error: 'session not found' });
     const redact = url.searchParams.get('redact') === '1';
-    const html = exportSession(file, { redact, title: sessionTitle(file), compactAt: getLimits().compactAt });
+    const html = exportSession(file, { redact, title: sessionTitle(file), byModel: getLimits().byModel });
     const name = `context-brain-${path.basename(file, '.jsonl').slice(0, 8)}${redact ? '-redacted' : ''}.html`;
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Content-Disposition': `attachment; filename="${name}"` });
     return res.end(html);

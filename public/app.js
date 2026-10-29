@@ -82,7 +82,10 @@ const neurons = new Map();
 let turns = [];            // [{ n, prompt, t, steps, answers, items, added, done, ms, ctxEnd }]
 let compactions = [];      // [{ afterTurn, tokens, t }]
 let ctxHistory = [];
-let compactAt = null;
+let compactAt = null;      // 이 세션 모델의 압축 기준 (값이 모일 때만)
+let compactInfo = { at: null, range: null, n: 0 };
+let byModel = null;
+let curModel = null;
 let viewTurn = null;       // 사용자가 고른 턴 번호. null 이면 지금 턴
 let selected = null;       // { n } 또는 { lobe }
 let wasteIds = new Set();
@@ -134,6 +137,7 @@ function trackTurn(e, n) {
 function applyEvent(e, live) {
   if (e.kind === 'usage') {
     ctxHistory.push(e.tokens);
+    if (e.model) curModel = e.model;
     if (ctxHistory.length > 120) ctxHistory.shift();
     const tr = curTurn();
     if (tr) tr.ctxEnd = e.tokens;
@@ -640,12 +644,18 @@ function renderRing(now) {
   const r = compactAt ? Math.min(1, now / compactAt) : 0;
   const color = r > 0.85 ? '#ff8a8a' : r > 0.65 ? '#ffc76b' : '#9be7a8';
   const C = 2 * Math.PI * 17;
-  box.innerHTML = `<svg width="44" height="44" viewBox="0 0 44 44" aria-hidden="true">
+  const rg = compactInfo.range;
+  // 기준이 있으면 남은 양, 없으면 같은 모델에서 자동 압축이 일어난 범위만 밝힌다
+  const sub = compactAt
+    ? L(`압축까지 약 ${kfmt(Math.max(0, compactAt - now))} (같은 모델 자동 압축 ${compactInfo.n}건 기준)`, `~${kfmt(Math.max(0, compactAt - now))} until compaction (from ${compactInfo.n} auto-compactions)`)
+    : rg ? L(`지난 자동 압축 ${kfmt(rg[0])}~${kfmt(rg[1])} (${compactInfo.n}건, 흩어져 기준 없음)`, `past auto-compactions ${kfmt(rg[0])}–${kfmt(rg[1])} (${compactInfo.n}, too spread for a threshold)`)
+      : L('이 모델의 자동 압축 기록 없음', 'no auto-compaction seen for this model');
+  box.innerHTML = `${compactAt ? `<svg width="44" height="44" viewBox="0 0 44 44" aria-hidden="true">
       <circle cx="22" cy="22" r="17" fill="none" stroke="rgba(255,255,255,0.1)" stroke-width="5"/>
-      ${compactAt ? `<circle cx="22" cy="22" r="17" fill="none" stroke="${color}" stroke-width="5" stroke-linecap="round"
-        stroke-dasharray="${(C * r).toFixed(1)} ${C.toFixed(1)}" transform="rotate(-90 22 22)"/>` : ''}
-      <text x="22" y="26" text-anchor="middle" font-size="11" fill="#e3e9f5">${compactAt ? Math.round(r * 100) + '%' : '?'}</text></svg>
-    <div><b>${kfmt(now)} ${L('토큰', 'tokens')}</b>${compactAt ? L(`압축까지 약 ${kfmt(Math.max(0, compactAt - now))}`, `~${kfmt(Math.max(0, compactAt - now))} until compaction`) : L('압축 기준 미관측', 'compaction point unknown')}
+      <circle cx="22" cy="22" r="17" fill="none" stroke="${color}" stroke-width="5" stroke-linecap="round"
+        stroke-dasharray="${(C * r).toFixed(1)} ${C.toFixed(1)}" transform="rotate(-90 22 22)"/>
+      <text x="22" y="26" text-anchor="middle" font-size="11" fill="#e3e9f5">${Math.round(r * 100)}%</text></svg>` : ''}
+    <div><b>${kfmt(now)} ${L('토큰', 'tokens')}</b>${sub}
       ${report && report.reclaim ? `<a class="reclaim" href="#doctor">${L(`되찾을 수 있는 양 약 ${kfmt(report.reclaim)}`, `~${kfmt(report.reclaim)} reclaimable`)}</a>` : ''}</div>`;
 }
 
@@ -664,10 +674,9 @@ function renderDoctor() {
     box.innerHTML = `<div class="empty">${L('아직 고칠 것이 없습니다', 'Nothing to fix yet')}</div>`;
     return;
   }
-  const pct = report.context && compactAt ? Math.round((report.context / compactAt) * 100) : null;
   const head = `<div class="doc-head"><div><b>${kfmt(report.reclaim)}</b><span>${L('지금 되찾을 수 있는 토큰', 'tokens reclaimable now')}</span></div>
     <div><b>${report.findings.length}</b><span>${L('진단', 'findings')}</span></div>
-    ${pct != null ? `<div><b>${pct}%</b><span>${L('압축 기준까지 찬 정도', 'of the compaction point')}</span></div>` : ''}</div>`;
+    </div>`;
   const cards = report.findings.map((f0) => {
     const f = lang === 'en' ? { ...f0, items: f0.items.map((i) => ({ ...i, label: window.CBModel.labelEn(i.id, i.label) })) } : f0;
     const d = describe(f, L);
@@ -918,6 +927,7 @@ function scheduleRender() {
   if (renderTimer) return;
   renderTimer = setTimeout(() => {
     renderTimer = null;
+    if (byModel) { compactInfo = window.CBModel.pickCompact(byModel, curModel); compactAt = compactInfo.at; }
     renderDoctor();        // 링이 되찾을 양을 보여 주므로 예산보다 먼저
     renderBudget();
     brain.refresh();
@@ -1142,6 +1152,7 @@ function reset() {
   turns = [];
   compactions = [];
   ctxHistory = [];
+  curModel = null;
   selected = null;
   viewTurn = null;
   wasteIds = new Set();
@@ -1215,12 +1226,13 @@ if (embedded) {
   document.body.classList.add('static');
   LOBE_NAMES = d.lobes || {};
   compactAt = d.compactAt || null;
+  compactInfo = { at: compactAt, range: d.compactRange || null, n: d.compactN || 0 };
   allEvents = (d.variants && d.variants[lang]) || d.events || [];
   const title = (d.titles && d.titles[lang]) || d.title;
   $('status').textContent = title ? `${L('공유된 세션', 'Shared session')} · ${title}` : L('공유된 세션', 'Shared session');
   if (d.autoplay) { applyUpTo(0); setTimeout(startPlay, 800); } else applyUpTo(allEvents.length);
 } else {
-  fetch('/api/limits').then((r) => r.json()).then((l) => { compactAt = l.compactAt; scheduleRender(); }).catch(() => {});
+  fetch('/api/limits').then((r) => r.json()).then((l) => { byModel = l.byModel || {}; scheduleRender(); }).catch(() => {});
   refreshSessions().then(() => connect('latest'));
   setInterval(refreshSessions, 5000);
 }
