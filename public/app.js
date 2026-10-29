@@ -410,7 +410,8 @@ const brain = (() => {
 
 $('brain-size').addEventListener('click', () => {
   const big = $('brainbox').classList.toggle('big');
-  $('brain-size').textContent = big ? '작게' : '크게';
+  document.body.classList.toggle('brain-big', big);
+  $('brain-size').textContent = big ? '작게 (Esc)' : '크게';
   brain.setLabels(big);
 });
 addEventListener('keydown', (ev) => { if (ev.key === 'Escape' && $('brainbox').classList.contains('big')) $('brain-size').click(); });
