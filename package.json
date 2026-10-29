@@ -6,7 +6,8 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "test": "jest --coverage"
+    "test": "jest --coverage",
+    "demo": "node scripts/demo.js"
   },
   "jest": {
     "testEnvironment": "node",
@@ -16,5 +17,6 @@
   },
   "devDependencies": {
     "jest": "^29.7.0"
-  }
+  },
+  "license": "MIT"
 }
