@@ -1,145 +1,111 @@
 # Context Brain
 
-**Claude Code 세션의 컨텍스트를 3D 뇌로 보여 주는 로컬 뷰어.** 컨텍스트 종류마다 뇌 영역을 하나씩 두고, 컨텍스트에 들어온 항목(읽은 파일, 셸 출력, 규칙, 스킬…)을 뉴런으로 그립니다. 뇌만 보고도 세 가지가 읽히도록 만들었습니다.
+**See what Claude Code is holding in its head.** Context Brain turns a Claude Code session into a live 3D brain: every file it read, every shell output, rule, skill and tool result becomes a neuron in its own region, and you watch light flow from the context into each answer.
 
-| 질문 | 뇌에서 보이는 것 |
-|---|---|
-| 무엇이 컨텍스트를 차지하고 있나 | 영역 배지의 토큰 합계, 뉴런 크기, 큰 항목의 이름표 |
-| 이번 답변은 무엇을 보고 나왔나 | 항목에서 응답 영역으로 이어진 빛줄기 (굵기 = 들어온 토큰). 답변에 이름이 나온 근거는 흰 입자 |
-| 무엇이 자리만 차지하고 있나 | 붉게 숨쉬는 뉴런 (낭비 후보) |
+**[▶ Live demo](https://context-brain.pages.dev)** (no install, replays a sample session) · [한국어](README.ko.md)
 
-![컨텍스트 뇌](docs/brain.png)
-
-## 빠른 시작
+![Context Brain replaying a session](docs/brain.gif)
 
 ```bash
-git clone https://github.com/workdd/context-brain.git
-cd context-brain
-npm install
-npm start            # http://localhost:7788
+npx github:workdd/context-brain
 ```
 
-브라우저를 열어 두고 다른 터미널에서 Claude Code를 쓰면 됩니다. 기본값은 **가장 최근에 수정된 세션을 자동으로 따라가는** 모드입니다. 다른 세션은 위쪽 목록에서 고릅니다.
+That's it. It opens your browser and follows your most recent Claude Code session in real time. Nothing to configure: it only reads the session logs Claude Code already writes.
 
-Claude Code 세션이 없어도 데모로 확인할 수 있습니다.
+## What it answers
+
+| Question | Where you see it |
+|---|---|
+| What is filling my context? | Region badges with token totals, neuron size, name tags on the biggest items |
+| What did this answer actually use? | Light beams from items into the Response region (thickness = tokens returned). White particles = the answer names that item |
+| What is just taking up space? | Red pulsing neurons: 800+ tokens, not used again for more than 2 turns |
+| How close am I to auto-compaction? | The ring in the corner, against the size where your recent sessions actually compacted |
+| How did the session unfold? | Replay: scrub through the whole session and watch the brain grow turn by turn |
+
+## Features
+
+- **Live**: tails the session log every 0.4 s and pushes events over Server-Sent Events. Tool calls flash in their region, results flow back in white.
+- **Replay**: replay any session from the start at 4×, 16× or 64×, or drag the slider to any point. `Space` plays and pauses.
+- **Turn stepping**: `[` and `]` (or ◀ ▶) re-light the brain for a past turn: which items it used, which beams fed the answer.
+- **Share as one HTML file**: export a session as a single self-contained HTML that opens without a server and replays itself. Redaction is on by default.
+- **Click anything**: a region badge zooms the camera and lists its items. A neuron shows the full command or edit, the start of its output, its use history and the turns it appeared in.
+- **Budget panel**: measured context size (from API usage), a compaction gauge, a size sparkline, a treemap of what takes the space, and the dead-weight list.
+- **Turn timeline**: per turn, a mini brain, the tool-call flow (failures in red), and each answer sentence with chips for the items it names.
+- **English and Korean UI**: follows your browser language. Switch in the header.
+
+![Context Brain viewer](docs/brain-en.png)
+
+## Brain regions
+
+| Region | What lands there |
+|---|---|
+| Response | Thinking and answers. Every beam ends here |
+| Rules (CLAUDE.md) | One neuron per loaded CLAUDE.md |
+| Tool list | Skill list, agent list, MCP instructions, deferred tool schemas |
+| Subagents · Web | Agent calls (by type), WebSearch and WebFetch (by host) |
+| Skills · MCP | Skill calls and skill bodies, `mcp__server__tool` calls (by server) |
+| Dialog · Shell | Your prompts and compaction summaries, Bash commands (one neuron per command, named by its description) |
+| Files | Read, Edit, Write, Grep, Glob |
+| Memory (hooks) | Extra context injected by SessionStart and other hooks |
+| System prompt | System prompt, environment, date, model |
+
+## Commands
 
 ```bash
-npm run demo                    # 가짜 세션이 한 단계씩 진행됨
-node scripts/demo.js --static   # 세 턴을 한 번에 기록하고 멈춤
+npx github:workdd/context-brain                     # viewer on http://localhost:7788, opens the browser
+npx github:workdd/context-brain demo                # sample session, no Claude Code needed
+npx github:workdd/context-brain export latest --redact -o my-session.html
 ```
 
-- Node.js 18 이상이 필요합니다. 런타임 의존성은 없습니다 (jest는 테스트용)
-- three.js는 브라우저에서 CDN(jsdelivr, `three@0.160.0`)으로 불러옵니다
-- 포트는 `PORT=8000 npm start`처럼 바꿀 수 있습니다
-
-## 뇌 읽는 법
-
-### 영역
-
-| 영역 | 뇌 위치 | 무엇이 들어오나 |
-|---|---|---|
-| 응답 | 앞쪽 | Claude의 생각과 답변. 모든 빛줄기가 모이는 곳 |
-| 규칙 (CLAUDE.md) | 앞쪽 위 | 실린 CLAUDE.md 파일마다 뉴런 하나 |
-| 도구 목록 | 꼭대기 | 스킬 목록, 에이전트 목록, MCP 안내, 지연 로드한 도구 스키마 |
-| 서브에이전트 · 웹 | 앞쪽 좌우 | Agent 호출(종류별), WebSearch · WebFetch(호스트별) |
-| 스킬 · MCP | 뒤쪽 좌우 | Skill 호출과 스킬 본문, `mcp__서버__도구` 호출(서버별) |
-| 대화 · 셸 | 옆 아래 | 사용자 입력과 압축 요약, Bash 명령 (명령 1회 = 뉴런 1개, 이름은 명령 설명) |
-| 파일 | 뒤쪽 | Read, Edit, Write, Grep, Glob |
-| 기억 (훅 주입) | 안쪽 | SessionStart 훅 등이 넣은 추가 컨텍스트 |
-| 시스템 프롬프트 | 아래 뒤 | 시스템 프롬프트, 환경, 날짜, 모델 정보 |
-
-뇌 표면은 항목이 있는 영역만 그 영역 색으로 옅게 칠해집니다. 영역 배지에는 이름과 지금 컨텍스트에 남은 토큰 합계가 나옵니다.
-
-### 뉴런과 빛
-
-| 보이는 것 | 뜻 |
+| Option | Meaning |
 |---|---|
-| 뉴런 크기 | 그 항목이 차지한 토큰 수 (추정) |
-| 밝은 뉴런 | 보고 있는 턴에 쓰임. 그 전 두 턴에 쓰인 것은 중간 밝기, 오래된 것은 어둡게 |
-| 회색 뉴런 | 압축으로 컨텍스트에서 빠짐 |
-| 붉게 숨쉬는 뉴런 | 낭비 후보. 800토큰 이상 들어왔는데 마지막으로 쓰인 뒤 2턴 넘게 다시 쓰이지 않음 |
-| 이름표 | 토큰이 큰 상위 8개와 보고 있는 턴의 항목(최대 12개). 겹치면 우선순위가 낮은 쪽을 숨김 |
-| 빛줄기 | 보고 있는 턴에 쓰인 항목 → 응답. **굵기 = 결과로 들어온 토큰**. 입자가 계속 흐름 |
-| 흰 입자 | 답변 문장에 그 항목 이름이 그대로 나옴 (근거) |
-| 순간 반짝임 | 실시간으로 도구 호출(영역 색)과 결과(흰색)가 오갈 때 |
-| 전체가 붉게 번쩍임 | 압축이 일어남 |
+| `--port <n>` | Port (falls through to the next free one) |
+| `--no-open` | Do not open the browser |
+| `export [file.jsonl\|latest]` | Save a session as one HTML file that replays itself |
+| `--redact` | Leave out tool output previews, commands, prompts and answer text. Home paths always become `~` |
 
-### 조작
+From a clone: `npm install && npm start`. Node.js 18+, no runtime dependencies. three.js loads from a CDN in the browser.
 
-| 조작 | 동작 |
-|---|---|
-| 영역 배지 클릭 | 카메라가 그 영역으로 다가가고, 오른쪽에 그 영역 항목 목록이 뜸 |
-| 뉴런 클릭 | 상세 패널: 실행한 명령이나 수정 내용 전체, 결과 앞부분, 사용 이력, 쓰인 턴 |
-| ◀ ▶ (또는 `[` `]` 키) | 보고 있는 턴을 바꿈. 뇌의 밝기와 빛줄기가 그 턴 기준으로 바뀜 |
-| 옆 · 위 · 앞 | 시점 이동. 드래그로 돌리고 휠로 확대 |
-| 회전 | 자동 회전 켜기/끄기 (기본은 끔) |
-| 크게 | 화면 전체로 키움 (Esc로 복귀) |
-
-왼쪽 위 링은 압축 기준 대비 현재 컨텍스트 크기입니다. 압축 기준은 최근 세션에서 실제로 자동 압축이 일어난 직전 크기 중 최댓값입니다.
-
-![영역 확대](docs/lobe.png)
-
-## 뇌 아래 패널
-
-![예산과 타임라인](docs/panels.png)
-
-| 패널 | 내용 |
-|---|---|
-| 컨텍스트 예산 | 현재 컨텍스트(API 실측), 압축 기준 게이지, 크기 변화 그래프, 항목별 면적 지도, 낭비 후보 목록 |
-| 턴 타임라인 | 턴마다 작은 뇌 썸네일, 도구 호출 흐름(실패는 빨간 테두리), 답변 문장별 근거 칩, 늘 실려 있던 컨텍스트. "이 턴을 뇌에서 보기"로 위 뇌를 그 턴으로 바꿈 |
-
-목록 위에 마우스를 올리면 뇌에서 해당 뉴런이 잠깐 밝아집니다.
-
-## 동작 방식
+## How it works
 
 ```
-~/.claude/projects/<프로젝트>/<세션>.jsonl   Claude Code가 쓰는 세션 로그
-        │  0.4초마다 새 줄만 읽음 (lib/tail.js)
+~/.claude/projects/<project>/<session>.jsonl    written by Claude Code
+        │  read new lines every 0.4 s (lib/tail.js)
         ▼
-파서 (lib/parse.js)
-  · attachment(instructions, skill_listing …)  → 로드
-  · assistant tool_use                          → 사용
-  · user tool_result (tool_use_id로 짝 맞춤)     → 결과
-  · assistant text                              → 답변 본문 + 언급
-  · usage                                       → 컨텍스트 크기 (실측)
-  · system turn_duration / compact_boundary     → 턴 종료 / 압축
-        │  Server-Sent Events (server.js, 127.0.0.1:7788)
+parser (lib/parse.js)
+  attachment (instructions, skill_listing …)  → loaded
+  assistant tool_use                          → used
+  user tool_result (matched by tool_use_id)   → result
+  assistant text                              → answer + named items
+  usage                                       → context size (measured)
+  system turn_duration / compact_boundary     → turn end / compaction
+        │  Server-Sent Events (server.js, 127.0.0.1 only)
         ▼
-브라우저
-  · public/model.js  면적 지도 배치, 문장 분리, 근거 연결, 낭비 판정
-  · public/app.js    3D 뇌 (three.js), 예산, 타임라인, 상세
+browser: public/app.js (three.js brain, panels, replay) + public/model.js (treemap, evidence, dead weight)
 ```
 
-- Claude Code 설정이나 훅을 건드리지 않습니다. 로그 파일을 읽기만 합니다
-- 서버는 `127.0.0.1`에만 열립니다. `~/.claude/projects` 밖의 파일은 요청해도 404를 돌려줍니다
-- 서브에이전트 내부 작업(사이드체인)과 claude-mem 관찰 세션은 그리지 않습니다
+- Read-only. It never touches Claude Code settings or hooks.
+- The server binds to `127.0.0.1` and refuses any path outside `~/.claude/projects`.
+- Subagent sidechains and claude-mem observer sessions are skipped.
 
-## 읽을 때 주의
+## Read it with care
 
-- **빛과 근거는 attention이 아닙니다.** 실제로 일어난 사용 기록(도구 호출, 결과, 답변 본문의 이름 일치)입니다. 이름을 말하지 않고 내용만 쓴 문장은 근거가 없는 것처럼 보입니다.
-- **뉴런 토큰은 추정치입니다.** 글자 수를 4로 나눈 값이고, 이미지는 장당 1,600으로 셉니다. 한글처럼 글자당 토큰이 많은 언어는 실제보다 작게 나옵니다. 링과 "현재 컨텍스트"만 API 실측값입니다.
-- **압축 기준은 관측값입니다.** 모델이나 설정이 다른 세션의 압축 크기가 섞일 수 있습니다.
-- **낭비 후보는 제안입니다.** 다시 쓰이지 않았다는 사실만 봅니다. 규칙처럼 조용히 참고되는 내용은 대상에서 뺐습니다.
-- **로그 형식은 공개 규격이 아닙니다.** Claude Code 버전이 바뀌면 일부 항목이 안 잡힐 수 있습니다. 파서는 모르는 항목을 건너뜁니다.
+- **Light is not attention.** Beams and evidence come from what actually happened: tool calls, results, and item names appearing in the answer text. A sentence that uses a file without naming it shows no evidence.
+- **Neuron tokens are estimates** (characters / 4, images 1,600 each). Non-English text is under-counted. Only the ring and "Context now" are measured by the API.
+- **The compaction point is observed**, taken from recent sessions that actually compacted. Sessions on different models or settings can mix.
+- **Dead weight is a hint.** It only knows an item was not used again. Rules and other quietly consulted context are excluded.
+- **The log format is not a public spec.** A Claude Code update can hide some items. Unknown entries are skipped.
 
-## 개발
+## Development
 
 ```bash
-npm test             # jest, lib/ 와 public/model.js 커버리지 포함
+npm test             # jest with coverage for lib/ and public/model.js
+npm run demo         # sample session that keeps adding steps live
+npm run build:web    # build web/index.html (the live demo)
 ```
 
-| 파일 | 역할 |
-|---|---|
-| `lib/parse.js` | 로그 한 줄 → 이벤트 변환 (영역 분류, 토큰 추정, 상세 미리보기, 답변 본문) |
-| `lib/tail.js` | 커지는 파일 따라 읽기 (덜 쓴 줄은 다음 읽기로 넘김) |
-| `lib/sessions.js` | 세션 목록, 경로 검사, 관측된 압축 기준 |
-| `server.js` | 정적 파일 + `/api/sessions` + `/api/limits` + `/api/stream` (SSE) |
-| `public/model.js` | 화면과 무관한 판단 로직 (브라우저와 jest 공용) |
-| `public/app.js` | 3D 뇌와 화면 전체 |
-| `scripts/demo.js` | 임시 폴더에 가짜 세션을 만들어 뷰어를 띄움 |
+`CLAUDE_PROJECTS_DIR` points the viewer at another log folder.
 
-`CLAUDE_PROJECTS_DIR` 환경 변수로 로그 폴더를 바꿀 수 있습니다.
-
-## 라이선스
+## License
 
 MIT
