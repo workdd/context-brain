@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Context Brain</title>
 <link rel="stylesheet" href="style.css">
+<script src="model.js"></script>
 <script type="importmap">
 {
   "imports": {
@@ -15,45 +16,51 @@
 </script>
 </head>
 <body>
-<div id="stage"></div>
+<header id="top">
+  <div class="brand"><h1>Context Brain</h1><span>Claude Code 컨텍스트 관찰</span></div>
+  <select id="session" aria-label="세션"></select>
+  <label class="check"><input type="checkbox" id="follow" checked> 최근 세션 따라가기</label>
+  <span id="status" class="status">연결 중…</span>
+</header>
 
-<section id="hud" class="panel">
-  <h1>Context Brain</h1>
-  <p class="sub">Claude Code 컨텍스트 중 지금 쓰이는 영역</p>
-  <label class="row">
-    <span>세션</span>
-    <select id="session"></select>
-  </label>
-  <label class="row check"><input type="checkbox" id="follow" checked> 가장 최근 세션 따라가기</label>
-  <div class="ctx">
-    <div class="ctx-label">현재 컨텍스트 <small>(API 보고값)</small></div>
-    <div class="ctx-value" id="ctx">-</div>
-    <canvas id="spark" width="240" height="36"></canvas>
+<main>
+  <section id="budget" class="card">
+    <div class="budget-head">
+      <div class="ctx-now">
+        <div class="label">현재 컨텍스트 <small>API 실측</small></div>
+        <div class="big" id="ctx">-</div>
+      </div>
+      <div class="gauge">
+        <div class="gauge-bar"><i id="gauge-fill"></i></div>
+        <div class="gauge-note" id="gauge-note"></div>
+      </div>
+      <canvas id="spark" width="220" height="44" aria-label="컨텍스트 크기 변화"></canvas>
+    </div>
+    <div class="budget-body">
+      <div class="map-wrap">
+        <div class="label">자리를 차지한 것 <small>타일 크기 = 글자 수 기반 추정 토큰 · <span id="map-note"></span></small></div>
+        <div id="treemap"></div>
+      </div>
+      <aside id="waste"></aside>
+    </div>
+  </section>
+
+  <div class="cols">
+    <section id="timeline" class="card">
+      <div class="card-head"><h2>턴 타임라인</h2><span class="hint">입력 → 도구 호출 → 답변. 답변 문장 옆 칩은 그 문장에 이름이 나온 근거입니다</span></div>
+      <ol id="turns"></ol>
+    </section>
+    <aside class="side">
+      <section id="brainbox" class="card">
+        <div class="card-head"><h2 id="brain-title">컨텍스트 뇌</h2><button id="brain-size" type="button">크게</button></div>
+        <div id="stage"></div>
+      </section>
+      <section id="detail" class="card" hidden></section>
+    </aside>
   </div>
-  <div id="status" class="status">연결 중…</div>
-</section>
-
-<section id="legend" class="panel">
-  <h2>영역</h2>
-  <ul id="lobes"></ul>
-  <p class="note">→ 사용: 응답에서 영역으로 나가는 빛 (영역 색)<br>← 결과: 영역에서 응답으로 돌아오는 빛 (흰색)<br>크기 = 토큰 (글자 수/4 추정) · 회색 = 압축으로 빠짐<br>뉴런을 클릭하면 자세히 볼 수 있습니다</p>
-</section>
-
-<section id="turn" class="panel" hidden></section>
-
-<section id="log" class="panel">
-  <div class="log-head">
-    <h2>자극 기록</h2>
-    <button id="log-compact" type="button">축약</button>
-    <button id="log-fold" type="button">접기</button>
-  </div>
-  <ol id="events"></ol>
-</section>
-
-<section id="detail" class="panel" hidden></section>
+</main>
 
 <div id="tip" class="tip" hidden></div>
-
 <script type="module" src="app.js"></script>
 </body>
 </html>

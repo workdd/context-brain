@@ -6,7 +6,7 @@ const http = require('http');
 const path = require('path');
 const { createState, parseLines, LOBES } = require('./lib/parse');
 const { Tailer } = require('./lib/tail');
-const { listSessions, isAllowed } = require('./lib/sessions');
+const { listSessions, isAllowed, observedCompactAt } = require('./lib/sessions');
 
 const PORT = Number(process.env.PORT || 7788);
 const HOST = '127.0.0.1';
@@ -37,9 +37,17 @@ function stream(req, res, file) {
   req.on('close', () => { tailer.stop(); clearInterval(ping); });
 }
 
+let limits = null;
+
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, `http://${HOST}`);
   if (url.pathname === '/api/sessions') return sendJson(res, 200, listSessions());
+  if (url.pathname === '/api/limits') {
+    if (!limits || Date.now() - limits.at > 5 * 60 * 1000) {
+      limits = { at: Date.now(), ...observedCompactAt(listSessions(undefined, 40).map((x) => x.file)) };
+    }
+    return sendJson(res, 200, limits);
+  }
   if (url.pathname === '/api/stream') {
     let file = url.searchParams.get('file');
     if (!file || file === 'latest') file = (listSessions(undefined, 1)[0] || {}).file;

@@ -57,6 +57,7 @@ describe('parseEntry', () => {
     parseEntry(assistant([{ type: 'tool_use', id: 't', name: 'Edit', input: { file_path: '/r/parse.js' } }]), s);
     const ev = parseEntry(assistant([{ type: 'text', text: 'parse.js 를 고쳤습니다' }]), s);
     expect(ev.map((e) => e.kind)).toEqual(['use', 'ref']);
+    expect(ev[0].text).toBe('parse.js 를 고쳤습니다');
     expect(ev[1]).toMatchObject({ lobe: 'files', id: 'file:/r/parse.js' });
   });
 

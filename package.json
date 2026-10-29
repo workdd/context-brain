@@ -12,7 +12,8 @@
   "jest": {
     "testEnvironment": "node",
     "collectCoverageFrom": [
-      "lib/**/*.js"
+      "lib/**/*.js",
+      "public/model.js"
     ]
   },
   "devDependencies": {

@@ -2,7 +2,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { Tailer } = require('../lib/tail');
-const { listSessions, isAllowed } = require('../lib/sessions');
+const { listSessions, isAllowed, observedCompactAt } = require('../lib/sessions');
 
 let dir;
 beforeEach(() => { dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cb-')); });
@@ -71,5 +71,16 @@ describe('sessions', () => {
     expect(isAllowed(path.join(dir, 'p', 'a.jsonl'), dir)).toBe(true);
     expect(isAllowed(path.join(dir, '..', 'etc', 'a.jsonl'), dir)).toBe(false);
     expect(isAllowed(path.join(dir, 'p', 'a.json'), dir)).toBe(false);
+  });
+});
+
+describe('observedCompactAt', () => {
+  test('압축 직전 크기 중 최댓값과 표본 수', () => {
+    const a = path.join(dir, 'a.jsonl');
+    const b = path.join(dir, 'b.jsonl');
+    fs.writeFileSync(a, '{"type":"system","subtype":"compact_boundary","compactMetadata":{"trigger":"auto","preTokens":1200}}\n{"type":"user"}\n');
+    fs.writeFileSync(b, '{"type":"system","subtype":"compact_boundary","compactMetadata":{"preTokens":3400}}\n');
+    expect(observedCompactAt([a, b, path.join(dir, 'none')])).toEqual({ compactAt: 3400, samples: 2 });
+    expect(observedCompactAt([])).toEqual({ compactAt: null, samples: 0 });
   });
 });

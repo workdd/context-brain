@@ -12,6 +12,11 @@ const dir = path.join(root, '-home-dev-shop-api');
 fs.mkdirSync(dir);
 const file = path.join(dir, 'demo-session.jsonl');
 process.env.CLAUDE_PROJECTS_DIR = root;
+// 압축 기준은 최근 세션에서 실제로 압축이 일어난 크기로 잡는다. 데모용으로 예전 세션 하나에 압축 기록을 남겨 둔다
+const old = path.join(dir, 'earlier-session.jsonl');
+fs.writeFileSync(old, JSON.stringify({ type: 'system', subtype: 'compact_boundary', compactMetadata: { trigger: 'auto', preTokens: 60000 } }) + '\n');
+const past = new Date(Date.now() - 86400000);
+fs.utimesSync(old, past, past);
 
 let clock = Date.now() - 10 * 60 * 1000;
 let seq = 0;
@@ -44,32 +49,53 @@ const boot = [
   att({ type: 'date', date: '2026-10-29' }),
 ];
 
-// 한 번의 작업 흐름: 버그 신고 → 조사 → 수정 → 검증 → 답변
-const steps = [
-  [user('로그인할 때 가끔 401 이 나요. 원인 찾아서 고쳐 줘')],
-  [assistant([{ type: 'thinking', thinking: pad('토큰 검증 경로부터 본다', 800) }], 300)],
-  tool('Skill', { skill: 'systematic-debugging' }, 'Launching skill', 200),
-  [user([{ type: 'text', text: pad('Base directory for this skill: /home/dev/.claude/skills/systematic-debugging\n# Debugging', 7000) }])],
-  tool('Grep', { pattern: 'verifyToken', path: 'src' }, 'src/auth/token.ts\nsrc/middleware/auth.ts', 300),
-  tool('Read', { file_path: '/home/dev/shop-api/src/auth/token.ts' }, pad('export function verifyToken(t) {', 9000), 2400),
-  tool('Read', { file_path: '/home/dev/shop-api/src/middleware/auth.ts' }, pad('app.use(auth)', 5000), 1400),
-  tool('Bash', { command: 'npm test -- auth', description: '인증 테스트 실행' },
-    'FAIL src/auth/token.test.ts\n  ✕ accepts token near expiry (12 ms)\n    expected 200, got 401', 500),
-  tool('WebSearch', { query: 'jsonwebtoken clockTolerance expiry skew' }, pad('Result: clockTolerance option…', 4000), 1100),
-  tool('Agent', { subagent_type: 'Explore', description: '토큰 만료 처리 위치 찾기' }, pad('Found 3 call sites…', 2500), 700),
-  tool('mcp__github__search_issues', { q: 'repo:dev/shop-api 401' }, pad('#212 Random 401 after deploy', 1800), 500),
-  tool('Edit', { file_path: '/home/dev/shop-api/src/auth/token.ts', old_string: 'jwt.verify(t, key)', new_string: 'jwt.verify(t, key, { clockTolerance: 30 })' },
-    'The file has been updated successfully.', 300),
-  tool('Bash', { command: 'npm test -- auth', description: '수정 후 인증 테스트 재실행' }, 'PASS src/auth/token.test.ts\n  ✓ accepts token near expiry', 300),
-  [assistant([{ type: 'text', text: '원인은 서버 간 시계 차이입니다. token.ts 에서 만료 검증에 30초 여유를 주도록 고쳤고, 인증 테스트가 통과합니다.' }], 400),
-    { type: 'system', subtype: 'turn_duration', timestamp: ts(), durationMs: 31400 }],
+const done = (ms) => ({ type: 'system', subtype: 'turn_duration', timestamp: ts(), durationMs: ms });
+
+// 서로 다른 작업 세 개. 첫 턴에서 읽은 큰 파일은 뒤 턴에서 다시 안 쓰여 낭비 후보가 된다
+const turns = [
+  [
+    [user('로그인할 때 가끔 401 이 나요. 원인 찾아서 고쳐 줘')],
+    [assistant([{ type: 'thinking', thinking: pad('토큰 검증 경로부터 본다', 800) }], 300)],
+    tool('Skill', { skill: 'systematic-debugging' }, 'Launching skill', 200),
+    [user([{ type: 'text', text: pad('Base directory for this skill: /home/dev/.claude/skills/systematic-debugging\n# Debugging', 7000) }])],
+    tool('Grep', { pattern: 'verifyToken', path: 'src' }, 'src/auth/token.ts\nsrc/middleware/auth.ts', 300),
+    tool('Read', { file_path: '/home/dev/shop-api/src/auth/token.ts' }, pad('export function verifyToken(t) {', 9000), 2400),
+    tool('Read', { file_path: '/home/dev/shop-api/src/middleware/auth.ts' }, pad('app.use(auth)', 5000), 1400),
+    tool('Bash', { command: 'npm test -- auth', description: '인증 테스트 실행' },
+      'FAIL src/auth/token.test.ts\n  ✕ accepts token near expiry (12 ms)\n    expected 200, got 401', 500),
+    tool('WebSearch', { query: 'jsonwebtoken clockTolerance expiry skew' }, pad('Result: clockTolerance option…', 4000), 1100),
+    tool('mcp__github__search_issues', { q: 'repo:dev/shop-api 401' }, pad('#212 Random 401 after deploy', 1800), 500),
+    tool('Edit', { file_path: '/home/dev/shop-api/src/auth/token.ts', old_string: 'jwt.verify(t, key)', new_string: 'jwt.verify(t, key, { clockTolerance: 30 })' },
+      'The file has been updated successfully.', 300),
+    tool('Bash', { command: 'npm test -- auth', description: '수정 후 인증 테스트 재실행' }, 'PASS src/auth/token.test.ts\n  ✓ accepts token near expiry', 300),
+    [assistant([{ type: 'text', text: '원인은 서버 간 시계 차이입니다. token.ts 에서 만료 검증에 30초 여유를 주도록 고쳤습니다.\n같은 증상이 github 이슈 #212 에도 보고돼 있습니다.\n수정 후 인증 테스트가 통과합니다.' }], 400), done(31400)],
+  ],
+  [
+    [user('주문 API 응답이 느린데 어디가 병목인지 봐 줘')],
+    tool('Agent', { subagent_type: 'Explore', description: '주문 조회 경로 찾기' }, pad('orders.service.ts → repo.findMany (N+1)', 2500), 700),
+    tool('Read', { file_path: '/home/dev/shop-api/src/orders/orders.service.ts' }, pad('export class OrdersService {', 7000), 1800),
+    tool('Bash', { command: 'npm run bench -- orders', description: '주문 API 벤치마크' }, 'GET /orders p95 840ms (queries: 51)', 400),
+    tool('Edit', { file_path: '/home/dev/shop-api/src/orders/orders.service.ts', old_string: 'for (const o of orders) await repo.items(o.id)', new_string: 'await repo.itemsFor(orders.map((o) => o.id))' },
+      'The file has been updated successfully.', 300),
+    tool('Bash', { command: 'npm run bench -- orders', description: '수정 후 벤치마크' }, 'GET /orders p95 120ms (queries: 2)', 300),
+    [assistant([{ type: 'text', text: '병목은 orders.service.ts 의 주문별 품목 조회(N+1)였습니다.\n한 번에 묶어 조회하도록 바꿔 쿼리가 51개에서 2개로 줄었습니다.\np95 응답 시간은 840ms 에서 120ms 가 됐습니다.' }], 400), done(24800)],
+  ],
+  [
+    [user('배포 전에 확인할 것 정리해 줘')],
+    tool('Read', { file_path: '/home/dev/shop-api/deploy/release.sh' }, pad('#!/bin/sh\nset -e', 3000), 900),
+    tool('Bash', { command: 'git log --oneline -5', description: '최근 커밋 확인' }, 'a1b2c3 fix: clockTolerance\nd4e5f6 perf: batch order items', 200),
+    [assistant([{ type: 'text', text: 'release.sh 는 마이그레이션 후 재시작 순서입니다.\n이번 배포에는 인증 수정과 주문 조회 개선이 들어갑니다.\n배포 전 인증 테스트와 주문 벤치마크를 한 번 더 돌려 보세요.' }], 300), done(9800)],
+  ],
 ];
 
-const write = (entries) => fs.appendFileSync(file, entries.map((e) => JSON.stringify(e)).join('\n') + '\n');
 const live = !process.argv.includes('--static');
+const write = (entries, now = false) => fs.appendFileSync(file, entries
+  .map((e) => JSON.stringify(now && e.timestamp ? { ...e, timestamp: new Date().toISOString() } : e)).join('\n') + '\n');
 
+// 처음 두 턴은 지난 기록으로 쓰고, 그다음부터 한 단계씩 실시간으로 추가한다
 write(boot);
-if (!live) steps.forEach(write);
+const history = live ? 2 : turns.length;
+turns.slice(0, history).forEach((t) => t.forEach((step) => write(step)));
 
 const { server } = require('../server');
 const port = Number(process.env.PORT || 7788);
@@ -79,10 +105,12 @@ server.listen(port, '127.0.0.1', () => {
 });
 
 if (live) {
+  let t = history % turns.length;
   let i = 0;
   setTimeout(function next() {
-    write(steps[i]);
-    i = (i + 1) % steps.length;
+    write(turns[t][i], true);
+    i++;
+    if (i === turns[t].length) { i = 0; t = (t + 1) % turns.length; }
     setTimeout(next, i === 0 ? 6000 : 1800);
   }, 2500);
 }
