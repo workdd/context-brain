@@ -663,7 +663,7 @@ function renderRing(now) {
   const rg = compactInfo.range;
   // 기준이 있으면 남은 양, 없으면 같은 모델에서 자동 압축이 일어난 범위만 밝힌다
   const sub = compactAt
-    ? L(`압축까지 약 ${kfmt(Math.max(0, compactAt - now))} (같은 모델 자동 압축 ${compactInfo.n}건 기준)`, `~${kfmt(Math.max(0, compactAt - now))} until compaction (from ${compactInfo.n} auto-compactions)`)
+    ? L(`압축까지 약 ${kfmt(Math.max(0, compactAt - now))} (같은 모델 자동 압축 ${compactInfo.n}건 기준)`, `~${kfmt(Math.max(0, compactAt - now))} until compaction (from ${compactInfo.n} auto-compaction${compactInfo.n === 1 ? '' : 's'})`)
     : rg ? L(`지난 자동 압축 ${kfmt(rg[0])}~${kfmt(rg[1])} (${compactInfo.n}건, 흩어져 기준 없음)`, `past auto-compactions ${kfmt(rg[0])}–${kfmt(rg[1])} (${compactInfo.n}, too spread for a threshold)`)
       : L('이 모델의 자동 압축 기록 없음', 'no auto-compaction seen for this model');
   box.innerHTML = `${compactAt ? `<svg width="44" height="44" viewBox="0 0 44 44" aria-hidden="true">

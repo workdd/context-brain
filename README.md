@@ -10,16 +10,16 @@
 npx github:workdd/context-brain
 ```
 
-That's it. It opens your browser and follows your most recent Claude Code session in real time. Nothing to configure: it only reads the session logs Claude Code already writes.
+That's it. It opens your browser and follows your most recent Claude Code session in real time, staying within that project. Nothing to configure: it only reads the session logs Claude Code already writes.
 
 ## What it answers
 
 | Question | Where you see it |
 |---|---|
 | What is filling my context? | Region badges with token totals, neuron size, name tags on the biggest items |
-| What did this answer actually use? | Light beams from items into the Response region (thickness = tokens returned). White particles = the answer names that item |
+| What did this answer actually use? | Lines from each item used in the turn to the Response region (thickness = tokens returned, brighter = the answer names it). A line is a record of use, not live attention |
 | What is just taking up space? | Red pulsing neurons: 800+ tokens, not used again for more than 2 turns |
-| How close am I to auto-compaction? | The ring in the corner, against the size where your recent sessions actually compacted |
+| How close am I to auto-compaction? | The ring in the corner, against where this model auto-compacted before. If past auto-compactions are too spread out to call a threshold, it shows the range instead of a percentage |
 | When and why did the context grow? | The context history strip under the brain: size per API call by region, the biggest jumps labeled with their cause, compactions marked |
 | What should I change? | Context doctor: each leak with its size and a concrete fix, in the browser, the terminal and the Claude Code status line |
 
@@ -91,8 +91,8 @@ It reads `transcript_path` from the status line input and caches the compaction 
 - **Share as one HTML file**: export a session as a single self-contained HTML that opens without a server and replays itself. Redaction is on by default.
 - **Click anything**: a region badge zooms the camera and lists its items. A neuron shows the full command or edit, the start of its output, its use history and the turns it appeared in.
 - **Context doctor**: ranked findings with their size, a concrete fix, and chips you can hover to find the item in the brain. Also `doctor` in the terminal and `statusline` for Claude Code.
-- **Budget panel**: measured context size (from API usage), a compaction gauge, a size sparkline, a treemap of what takes the space, and the dead-weight list.
-- **Turn timeline**: per turn, a mini brain, the tool-call flow (failures in red), and each answer sentence with chips for the items it names.
+- **What takes up the space**: a treemap of everything still in context, sized by estimated tokens. The biggest never-used-again items are outlined in red, the same ones that pulse red in the brain.
+- **This turn**: the turn the brain is showing, with its tool-call flow (failures in red) and each answer sentence with chips for the items it names. Pick another turn with ◀ ▶ or the history strip.
 - **English and Korean UI**: follows your browser language. Switch in the header.
 
 ![Context Brain viewer](docs/brain-en.png)
@@ -179,8 +179,8 @@ On whole sessions, the sum of item estimates now lands at 0.8 to 1.0 of the meas
 
 - **Light is not attention.** Beams and evidence come from what actually happened: tool calls, results, and item names appearing in the answer text. A sentence that uses a file without naming it shows no evidence.
 - **Neuron tokens are estimates** fitted to measured usage (see above). Only the ring and "Context now" are measured by the API directly.
-- **The compaction point is observed**, taken from recent sessions that actually compacted. Sessions on different models or settings can mix.
-- **Dead weight is a hint.** It only knows an item was not used again. Rules and other quietly consulted context are excluded.
+- **The compaction point is observed**, from automatic compactions of the same model in recent sessions (manual `/compact` is ignored). A model's sessions can run with different context windows, so when those sizes spread by more than 25% no threshold is claimed.
+- **"Never used again" is a hint.** It only knows an item was not called or named again. The model re-reads the whole context on every call, and the log does not say which parts it attended to. Rules and other quietly consulted context are excluded.
 - **The log format is not a public spec.** A Claude Code update can hide some items. Unknown entries are skipped.
 
 ## Development
