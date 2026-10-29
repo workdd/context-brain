@@ -8,6 +8,7 @@
 | 이번 답변은 무엇을 보고 나왔나 | 항목에서 응답 영역으로 이어진 빛줄기 (굵기 = 들어온 토큰). 답변에 이름이 나온 근거는 흰 입자 |
 | 무엇이 자리만 차지하고 있나 | 붉게 숨쉬는 뉴런 (낭비 후보) |
 | 세션이 어떻게 흘러왔나 | 재생 막대로 처음부터 다시 보기 |
+| 무엇을 고치면 되나 | 컨텍스트 진단: 새는 곳마다 크기와 고칠 방법. 브라우저 · 터미널 · Claude Code 상태줄 |
 
 **[▶ 웹 데모](https://context-brain.pages.dev/?lang=ko)** (설치 없이 예시 세션 재생) · [English](README.md)
 
@@ -26,6 +27,8 @@ npx github:workdd/context-brain
 | `npx github:workdd/context-brain` | 뷰어 실행 (http://localhost:7788) 후 브라우저 열기 |
 | `... demo` | 가짜 세션으로 실행 (Claude Code 없이 확인) |
 | `... export latest --redact -o 세션.html` | 세션을 HTML 파일 하나로 저장 |
+| `... doctor [세션\|latest]` | 진단과 조치를 터미널에 출력 (`--json`) |
+| `... statusline` | Claude Code 상태줄용 한 줄 |
 | `--port <번호>` | 포트 지정. 차 있으면 다음 번호 |
 | `--no-open` | 브라우저를 열지 않음 |
 
@@ -33,6 +36,39 @@ npx github:workdd/context-brain
 - Node.js 18 이상이 필요합니다. 런타임 의존성은 없습니다 (jest는 테스트용)
 - three.js는 브라우저에서 CDN(jsdelivr, `three@0.160.0`)으로 불러옵니다
 - 화면 언어는 브라우저 언어를 따릅니다. 상단 버튼으로 한국어와 영어를 바꿉니다
+
+## 컨텍스트 진단
+
+![컨텍스트 진단](docs/doctor.png)
+
+| 진단 | 권하는 조치 |
+|---|---|
+| 같은 파일을 여러 번 통째로 읽음 | offset · limit 로 필요한 줄만 읽기, Grep 먼저, 한 번 요약해 두기 |
+| 한 번에 큰 도구 결과 (결과 하나가 4k 토큰 이상) | head · grep · tail 로 줄이기, 조용한 옵션 |
+| 들어와서 다시 안 쓰인 항목 (800토큰 이상, 2턴 넘게 안 씀) | 작업이 바뀌는 지점에서 `/compact` 나 `/clear` |
+| 안내만 실리고 한 번도 안 부른 MCP 서버 | 이 프로젝트에서 서버 끄기 |
+| 불러 놓고 안 쓴 도구 스키마 | 쓸 도구 이름을 지시에 적기 |
+| 반복된 도구 실패 | 원인(권한 · 경로 · 명령)을 먼저 알려 주기 |
+| 늘 실려 있는 고정 비용 (규칙 · 스킬 목록 · 훅) | CLAUDE.md 줄이기, 안 쓰는 스킬 · 플러그인 끄기 |
+| 자동 압축 직전 | 남길 내용을 적어 지금 `/compact` |
+
+"지금 되찾을 수 있는 양"은 조치하면 실제로 컨텍스트에서 빠지는 양만 셉니다. 아직 남아 있는 안 쓰인 항목, 안 부른 MCP 안내, 안 쓴 스키마입니다.
+
+터미널에서는 `npx github:workdd/context-brain doctor` (스크립트용은 `--json`)로 같은 진단을 봅니다.
+
+### Claude Code 상태줄
+
+`~/.claude/settings.json` 에 넣으면 모든 세션의 상태줄에 되찾을 양이 따라붙습니다.
+
+```json
+{ "statusLine": { "type": "command", "command": "npx -y github:workdd/context-brain statusline" } }
+```
+
+```text
+🧠 ctx 232k (29%) · 되찾을 양 16k · 진단 높음 2
+```
+
+상태줄 입력의 `transcript_path` 를 읽고, 압축 기준은 10분 동안 캐시합니다. 더 빠르게 쓰려면 저장소를 받아 `node /경로/context-brain/bin/context-brain.js statusline` 을 지정하세요.
 
 ## 뇌 읽는 법
 
@@ -149,8 +185,8 @@ npm run build:web    # 웹 데모 web/index.html 생성
 | `server.js` | 정적 파일 + `/api/sessions` + `/api/limits` + `/api/stream` (SSE) + `/api/export` |
 | `lib/export.js` | 세션을 HTML 파일 하나로 묶음 (가리기 포함) |
 | `lib/demo.js` | 데모 세션 기록 (한국어 · 영어) |
-| `bin/context-brain.js` | `npx` 실행 명령 (실행 · demo · export) |
-| `public/model.js` | 화면과 무관한 판단 로직 (브라우저와 jest 공용) |
+| `bin/context-brain.js` | `npx` 실행 명령 (실행 · demo · export · doctor · statusline) |
+| `public/model.js` | 화면과 무관한 판단 로직: 면적 지도, 근거, 낭비, 진단 (브라우저 · CLI · jest 공용) |
 | `public/i18n.js` | 화면 언어 선택 |
 | `public/app.js` | 3D 뇌, 재생, 화면 전체 |
 | `scripts/demo.js` | 임시 폴더에 가짜 세션을 만들어 뷰어를 띄움 |

@@ -1,6 +1,6 @@
 # Context Brain
 
-**See what Claude Code is holding in its head.** Context Brain turns a Claude Code session into a live 3D brain: every file it read, every shell output, rule, skill and tool result becomes a neuron in its own region, and you watch light flow from the context into each answer.
+**See what Claude Code is holding in its head, and what to cut.** Context Brain turns a Claude Code session into a live 3D brain: every file it read, every shell output, rule, skill and tool result becomes a neuron in its own region, and you watch light flow from the context into each answer. A built-in context doctor then tells you where tokens leak and how to get them back.
 
 **[▶ Live demo](https://context-brain.pages.dev)** (no install, replays a sample session) · [한국어](README.ko.md)
 
@@ -21,6 +21,49 @@ That's it. It opens your browser and follows your most recent Claude Code sessio
 | What is just taking up space? | Red pulsing neurons: 800+ tokens, not used again for more than 2 turns |
 | How close am I to auto-compaction? | The ring in the corner, against the size where your recent sessions actually compacted |
 | How did the session unfold? | Replay: scrub through the whole session and watch the brain grow turn by turn |
+| What should I change? | Context doctor: each leak with its size and a concrete fix, in the browser, the terminal and the Claude Code status line |
+
+## Context doctor
+
+![Context doctor](docs/doctor.png)
+
+| Finding | Fix it suggests |
+|---|---|
+| Same file read in full more than once | Read with offset/limit, Grep first, summarize once |
+| Oversized tool output (4k+ tokens in one result) | Pipe through head/grep/tail, quiet flags |
+| Items never used again (800+ tokens, idle 2+ turns) | `/compact` or `/clear` at the task boundary |
+| MCP server instructions loaded but never called | Disable the server for this project |
+| Tool schemas loaded but unused | Name the tool in the prompt |
+| Repeated tool failures | Tell Claude the cause |
+| Large fixed context (rules, skills, hooks) | Trim CLAUDE.md, disable unused skills and plugins |
+| About to auto-compact | `/compact` now with a note on what to keep |
+
+The "reclaimable now" number counts only what leaves the context if you act: unused items still in context, unused MCP instructions and unused schemas.
+
+```text
+$ npx github:workdd/context-brain doctor
+Context doctor · Fix login 401
+context 232k / compacts at 810k (29%) · 24 turns
+reclaimable now: ~15.6k tokens
+
+HIGH  8 items never used again · 13.1k
+      Run /compact or /clear at the task boundary to drop this. ...
+      - src/orders/orders.service.ts  3.2k · idle 2 turns
+```
+
+### In the Claude Code status line
+
+Add this to `~/.claude/settings.json` and the reclaimable amount follows you in every session:
+
+```json
+{ "statusLine": { "type": "command", "command": "npx -y github:workdd/context-brain statusline" } }
+```
+
+```text
+🧠 ctx 232k (29%) · reclaim 16k · 2 high
+```
+
+It reads `transcript_path` from the status line input and caches the compaction point for 10 minutes. For speed, clone the repo and point `command` at `node /path/to/context-brain/bin/context-brain.js statusline`.
 
 ## Features
 
@@ -29,6 +72,7 @@ That's it. It opens your browser and follows your most recent Claude Code sessio
 - **Turn stepping**: `[` and `]` (or ◀ ▶) re-light the brain for a past turn: which items it used, which beams fed the answer.
 - **Share as one HTML file**: export a session as a single self-contained HTML that opens without a server and replays itself. Redaction is on by default.
 - **Click anything**: a region badge zooms the camera and lists its items. A neuron shows the full command or edit, the start of its output, its use history and the turns it appeared in.
+- **Context doctor**: ranked findings with their size, a concrete fix, and chips you can hover to find the item in the brain. Also `doctor` in the terminal and `statusline` for Claude Code.
 - **Budget panel**: measured context size (from API usage), a compaction gauge, a size sparkline, a treemap of what takes the space, and the dead-weight list.
 - **Turn timeline**: per turn, a mini brain, the tool-call flow (failures in red), and each answer sentence with chips for the items it names.
 - **English and Korean UI**: follows your browser language. Switch in the header.
@@ -55,6 +99,7 @@ That's it. It opens your browser and follows your most recent Claude Code sessio
 npx github:workdd/context-brain                     # viewer on http://localhost:7788, opens the browser
 npx github:workdd/context-brain demo                # sample session, no Claude Code needed
 npx github:workdd/context-brain export latest --redact -o my-session.html
+npx github:workdd/context-brain doctor              # findings in the terminal (--json for scripts)
 ```
 
 | Option | Meaning |
@@ -63,6 +108,8 @@ npx github:workdd/context-brain export latest --redact -o my-session.html
 | `--no-open` | Do not open the browser |
 | `export [file.jsonl\|latest]` | Save a session as one HTML file that replays itself |
 | `--redact` | Leave out tool output previews, commands, prompts and answer text. Home paths always become `~` |
+| `doctor [file.jsonl\|latest]` | Print findings and fixes. `--json` for machine output |
+| `statusline` | One line for the Claude Code status line |
 
 From a clone: `npm install && npm start`. Node.js 18+, no runtime dependencies. three.js loads from a CDN in the browser.
 
@@ -81,7 +128,8 @@ parser (lib/parse.js)
   system turn_duration / compact_boundary     → turn end / compaction
         │  Server-Sent Events (server.js, 127.0.0.1 only)
         ▼
-browser: public/app.js (three.js brain, panels, replay) + public/model.js (treemap, evidence, dead weight)
+browser: public/app.js (three.js brain, panels, replay) + public/model.js (treemap, evidence, doctor)
+terminal: bin/context-brain.js doctor | statusline (same public/model.js)
 ```
 
 - Read-only. It never touches Claude Code settings or hooks.
