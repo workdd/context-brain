@@ -26,6 +26,7 @@ const HELP = L(`context-brain: Claude Code 컨텍스트를 3D 뇌로 보는 로�
       -o <파일>                       저장 경로 (기본: context-brain-<세션>.html)
       --redact                       결과 미리보기 · 명령 · 입력 · 답변 본문을 빼고 저장
   context-brain doctor [세션|latest]  토큰이 새는 곳과 줄이는 법을 터미널에 출력 (--json)
+      --project [--limit 20]         그 세션의 프로젝트에서 최근 세션들을 모아 반복 패턴 진단
   context-brain statusline           Claude Code 상태줄에 컨텍스트 · 되찾을 양 표시
   context-brain calibrate            내 세션 실측 사용량으로 토큰 추정 계수를 맞춰 저장
 
@@ -38,6 +39,7 @@ const HELP = L(`context-brain: Claude Code 컨텍스트를 3D 뇌로 보는 로�
       -o <file>                         output path (default: context-brain-<session>.html)
       --redact                          leave out tool output, commands, prompts and answer text
   context-brain doctor [file|latest]    print where tokens leak and how to cut them (--json)
+      --project [--limit 20]            look across the project's recent sessions for repeated leaks
   context-brain statusline              one line for the Claude Code status line (context · reclaimable)
   context-brain calibrate               fit token estimates to your own sessions' measured usage and save them
 
@@ -51,6 +53,14 @@ if (flag('-h') || flag('--help') || cmd === 'help') {
 } else if (cmd === 'demo') {
   if (!noOpen) process.env.CB_OPEN = '1';
   require('../scripts/demo.js');
+} else if (cmd === 'doctor' && flag('--project')) {
+  const { file, compactAt } = findSession();
+  const { projectSessions } = require('../lib/project');
+  const { projectReport, describeProject, labelEn } = require('../public/model.js');
+  const report = projectReport(projectSessions(file, Number(value('--limit')) || 20), { compactAt });
+  if (!ko) for (const f of report.findings) for (const i of f.items) i.label = labelEn(i.id, i.label);
+  if (flag('--json')) console.log(JSON.stringify({ project: path.basename(path.dirname(file)), ...report }, null, 2));
+  else printProject(report, path.basename(path.dirname(file)), describeProject);
 } else if (cmd === 'doctor') {
   const { file, compactAt, title } = findSession();
   const { parseFile } = require('../lib/export');
@@ -163,4 +173,25 @@ function statusLine(file) {
   const high = r.findings.filter((f) => f.severity === 'high').length;
   if (high) parts.push(L(`진단 높음 ${high}`, `${high} high`));
   return '🧠 ' + parts.join(' · ');
+}
+
+function printProject(r, project, describeProject) {
+  const tty = process.stdout.isTTY;
+  const c = (code, t) => (tty ? `\x1b[${code}m${t}\x1b[0m` : t);
+  const k = (n) => (n >= 1000 ? (n / 1000).toFixed(1) + 'k' : String(Math.round(n || 0)));
+  const tag = { high: c('31;1', L('높음', 'HIGH')), mid: c('33;1', L('중간', 'MID ')), low: c('36', L('낮음', 'LOW ')) };
+  console.log(c('1', L(`프로젝트 진단 · ${project}`, `Project doctor · ${project}`)));
+  console.log(L(`세션 ${r.sessions}개 · 턴 ${r.turns} · 압축 ${r.compactions}회 · 컨텍스트 중앙값 ${k(r.medianContext)} · 세션당 고정 비용 ${k(r.fixed)}`,
+    `${r.sessions} sessions · ${r.turns} turns · ${r.compactions} compactions · median context ${k(r.medianContext)} · ${k(r.fixed)} fixed per session`));
+  if (!r.findings.length) console.log(L('\n반복되는 문제 없음.', '\nNo repeated leaks.'));
+  for (const f of r.findings) {
+    const d = describeProject(f, L);
+    console.log(`\n${tag[f.severity]}  ${c('1', d.title)}`);
+    console.log(`      ${c('2', d.fix)}`);
+    for (const i of f.items.slice(0, 6)) {
+      const extra = f.type === 'p-loud-shell' ? L(` · ${i.count}회 · 평균 ${k(i.avg)}`, ` · ${i.count} calls · avg ${k(i.avg)}`)
+        : L(` · 세션 ${i.count}개`, ` · ${i.count} sessions`);
+      console.log(`      - ${i.label}  ${c('2', k(i.tokens) + extra)}`);
+    }
+  }
 }

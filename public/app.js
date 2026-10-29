@@ -6,7 +6,7 @@ import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 
-const { squarify, splitSentences, findRefs, wasteCandidates, diagnose, describe } = window.CBModel;
+const { squarify, splitSentences, findRefs, wasteCandidates, diagnose, describe, describeProject, labelEn } = window.CBModel;
 const { L, lang } = window.CBLang;
 
 // ════════════════════════════════════════════════════════════
@@ -673,6 +673,61 @@ function renderDoctor() {
   }).join('');
   box.innerHTML = head + `<ol class="docs">${cards}</ol>`;
 }
+
+// ════════════════════════════════════════════════════════════
+// 화면: 프로젝트 진단 (요청할 때만 서버에서 계산)
+// ════════════════════════════════════════════════════════════
+async function runProject() {
+  if (!currentFile) return;
+  const body = $('project-body');
+  $('project-run').disabled = true;
+  body.innerHTML = `<div class="empty">${L('세션을 읽는 중…', 'reading sessions…')}</div>`;
+  try {
+    const r = await fetch('/api/project?file=' + encodeURIComponent(currentFile)).then((x) => x.json());
+    renderProject(r);
+  } catch (_) {
+    body.innerHTML = `<div class="empty">${L('분석하지 못했습니다', 'analysis failed')}</div>`;
+  }
+  $('project-run').disabled = false;
+}
+
+function renderProject(r) {
+  const loc = (i) => (lang === 'en' ? { ...i, label: labelEn(i.id, i.label) } : i);
+  const maxCtx = Math.max(1, ...r.rows.map((x) => x.context || 0), compactAt || 0);
+  const bars = r.rows.map((x) => {
+    const w = ((x.context || 0) / maxCtx) * 100;
+    const mark = compactAt ? `<i class="cut" style="left:${(compactAt / maxCtx) * 100}%"></i>` : '';
+    const ago = Math.round((Date.now() - x.mtime) / 3600000);
+    return `<li data-session="${escapeHtml(x.file)}" class="${x.file === currentFile ? 'cur' : ''}">
+      <span class="ps-title">${escapeHtml(short(x.title || x.file.split('/').pop().slice(0, 8), 30))}</span>
+      <span class="ps-bar"><b style="width:${w.toFixed(1)}%"></b>${mark}</span>
+      <span class="ps-meta">${kfmt(x.context || 0)} · ${L(`턴 ${x.turns}`, `${x.turns} turns`)}${x.compactions ? L(` · 압축 ${x.compactions}`, ` · ${x.compactions} compacted`) : ''}${x.reclaim ? ` · <em>${L('되찾을 양', 'reclaim')} ${kfmt(x.reclaim)}</em>` : ''} · ${ago < 1 ? L('방금', 'now') : ago < 48 ? L(`${ago}시간 전`, `${ago}h ago`) : L(`${Math.round(ago / 24)}일 전`, `${Math.round(ago / 24)}d ago`)}</span></li>`;
+  }).join('');
+  const cards = r.findings.map((f0) => {
+    const f = { ...f0, items: f0.items.map(loc) };
+    const d = describeProject(f, L);
+    const chips = f.items.slice(0, 6).map((i) => `<span class="chip"${neurons.has(i.id) ? ` data-id="${escapeHtml(i.id)}"` : ''}>${escapeHtml(short(i.label, 34))} <em>${kfmt(i.tokens)} · ${
+      f.type === 'p-loud-shell' ? L(`${i.count}회`, `×${i.count}`) : L(`세션 ${i.count}`, `${i.count} sessions`)}</em></span>`).join('');
+    return `<li class="doc ${f.severity}"><div class="doc-title"><span class="sev">${SEV_LABEL[f.severity]}</span>${escapeHtml(d.title)}</div>
+      <div class="doc-fix">${escapeHtml(d.fix)}</div><div class="flow">${chips}</div></li>`;
+  }).join('');
+  $('project-body').innerHTML = `<div class="doc-head">
+      <div><b>${r.sessions}</b><span>${L('세션', 'sessions')}</span></div>
+      <div><b>${kfmt(r.medianContext || 0)}</b><span>${L('컨텍스트 중앙값', 'median context')}</span></div>
+      <div><b>${r.compactions}</b><span>${L('압축', 'compactions')}</span></div>
+      <div><b>${kfmt(r.fixed)}</b><span>${L('세션당 고정 비용', 'fixed per session')}</span></div></div>
+    <ol class="psessions">${bars}</ol>
+    ${cards ? `<ol class="docs">${cards}</ol>` : `<div class="empty">${L('반복되는 낭비가 없습니다', 'no repeated leaks')}</div>`}`;
+}
+$('project-run').addEventListener('click', runProject);
+$('project-body').addEventListener('click', (ev) => {
+  const li = ev.target.closest('[data-session]');
+  if (!li) return;
+  $('follow').checked = false;
+  connect(li.dataset.session);
+  document.querySelectorAll('.psessions li').forEach((x) => x.classList.toggle('cur', x === li));
+  scrollTo({ top: 0, behavior: 'smooth' });
+});
 
 function renderBudget() {
   const now = ctxHistory[ctxHistory.length - 1];

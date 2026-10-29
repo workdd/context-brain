@@ -191,6 +191,8 @@
   }
 
   // 진단 한 건을 사람이 읽는 문장으로. L(ko, en) 은 언어를 고르는 함수
+  const pl = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+
   function describe(f, L) {
     const k = (n) => (n >= 1000 ? (n / 1000).toFixed(1) + 'k' : String(Math.round(n)));
     const top = f.items[0] ? f.items[0].label : '';
@@ -200,23 +202,23 @@
         fix: L('필요한 줄만 offset · limit 로 읽거나 Grep 으로 위치를 먼저 찾게 하세요. 한 번 읽은 내용은 요약해 두라고 지시하면 다시 읽지 않습니다.',
           'Ask for Read with offset/limit or a Grep first. Telling Claude to summarize a file once stops it from re-reading.') };
       case 'big-output': return {
-        title: L(`한 번에 큰 도구 결과 ${f.items.length}건 · ${k(f.tokens)}`, `${f.items.length} oversized tool results · ${k(f.tokens)}`),
+        title: L(`한 번에 큰 도구 결과 ${f.items.length}건 · ${k(f.tokens)}`, `${pl(f.items.length, 'oversized tool result')} · ${k(f.tokens)}`),
         fix: L(`출력을 head · grep · tail 로 줄이거나 조용한 옵션(-q)을 쓰게 하세요. 가장 큰 것: ${top}`,
           `Pipe output through head, grep or tail, or use quiet flags (-q). Largest: ${top}`) };
       case 'dead-weight': return {
-        title: L(`들어와서 다시 안 쓰인 항목 ${f.items.length}개 · ${k(f.tokens)}`, `${f.items.length} items never used again · ${k(f.tokens)}`),
+        title: L(`들어와서 다시 안 쓰인 항목 ${f.items.length}개 · ${k(f.tokens)}`, `${pl(f.items.length, 'item')} never used again · ${k(f.tokens)}`),
         fix: L('작업이 바뀌는 지점에서 /compact 나 /clear 를 쓰면 이 양이 빠집니다. 다음 작업에 필요한 것만 한 줄로 남기라고 지시하세요.',
           'Run /compact or /clear at the task boundary to drop this. Ask for a one-line note of what the next task needs.') };
       case 'unused-mcp': return {
-        title: L(`안 쓴 MCP 서버 안내 ${f.items.length}개 · ${k(f.tokens)}`, `${f.items.length} MCP servers loaded but never called · ${k(f.tokens)}`),
+        title: L(`안 쓴 MCP 서버 안내 ${f.items.length}개 · ${k(f.tokens)}`, `${pl(f.items.length, 'MCP server')} loaded but never called · ${k(f.tokens)}`),
         fix: L(`이 프로젝트에서 쓰지 않는 서버는 끄세요 (/mcp 또는 설정의 enabledMcpjsonServers). 예: ${top}`,
           `Disable servers this project does not use (/mcp or enabledMcpjsonServers). e.g. ${top}`) };
       case 'unused-schema': return {
-        title: L(`불러 놓고 안 쓴 도구 스키마 ${f.items.length}개 · ${k(f.tokens)}`, `${f.items.length} tool schemas loaded but unused · ${k(f.tokens)}`),
+        title: L(`불러 놓고 안 쓴 도구 스키마 ${f.items.length}개 · ${k(f.tokens)}`, `${pl(f.items.length, 'tool schema')} loaded but unused · ${k(f.tokens)}`),
         fix: L('도구를 찾느라 스키마를 여러 개 불렀습니다. 쓸 도구 이름을 지시에 직접 적으면 줄어듭니다.',
           'Claude loaded schemas while searching for a tool. Naming the tool in your prompt avoids this.') };
       case 'errors': return {
-        title: L(`실패한 도구 호출 ${f.items.reduce((a, i) => a + i.count, 0)}회`, `${f.items.reduce((a, i) => a + i.count, 0)} failed tool calls`),
+        title: L(`실패한 도구 호출 ${f.items.reduce((a, i) => a + i.count, 0)}회`, `${pl(f.items.reduce((a, i) => a + i.count, 0), 'failed tool call')}`),
         fix: L(`같은 실패가 반복되면 원인(권한 · 경로 · 명령)을 먼저 알려 주세요. 가장 많은 것: ${top}`,
           `If the same call keeps failing, tell Claude the cause (permission, path, command). Most frequent: ${top}`) };
       case 'standing': return {
@@ -243,5 +245,137 @@
     return label === '(입력)' ? '(prompt)' : label;
   }
 
-  return { squarify, splitSentences, needlesOf, findRefs, wasteCandidates, diagnose, describe, labelEn };
+  // ── 프로젝트 진단 ─────────────────────────────────────────
+  // 같은 프로젝트의 세션 여러 개를 모아, 한 세션에선 우연일 수 있는 것을 반복 패턴으로 확인한다.
+  // sessions: [{ file, title, mtime, events }] (최근 것이 앞)
+  // 명령에서 실제로 돈 프로그램 이름. cd · export 구간과 환경 변수 대입은 건너뛴다
+  function shellProgramOf(cmd) {
+    const firstLine = String(cmd || '').split('\n')[0]; // 여러 줄 명령(heredoc)은 첫 줄의 프로그램만 본다
+    for (const seg of firstLine.split(/&&|\|\||;/)) {
+      const words = seg.replace(/^[\s({]+/, '').split(/\s+/).filter(Boolean);
+      if (!words.length || ['cd', 'export', 'set', 'source', '.'].includes(words[0])) continue;
+      const w = words.find((x) => !/^[A-Za-z_][A-Za-z0-9_]*=/.test(x) && !['sudo', 'time', 'env', 'command'].includes(x));
+      if (!w) continue;
+      if (/^\.{0,2}\//.test(w) && !w.includes('/bin/')) return '?';
+      const name = w.split('/').pop();
+      return /^[\w@+.-]+$/.test(name) && !/\.(md|txt|json|ya?ml|csv|html?)$/i.test(name) ? name : '?';
+    }
+    return '?';
+  }
+
+  const READ_LIKE = new Set(['cat', 'sed', 'head', 'tail', 'awk', 'less', 'nl', 'bat', 'wc', 'grep', 'rg', 'ls', 'find', 'jq']);
+
+  function projectReport(sessions, opts) {
+    const o = Object.assign({ compactAt: null }, opts || {});
+    const mcp = new Map();       // server → { loaded, called, tokens }
+    const files = new Map();     // file id → { label, sessions: Set, reads, tokens }
+    const shell = new Map();     // program → { calls, tokens, sessions: Set }
+    const standing = new Map();  // id → { label, sessions, tokens }
+    const rows = [];
+    for (const s of sessions) {
+      const r = diagnose(s.events, o);
+      const cmd = new Map();
+      const loadedMcp = new Set();
+      const calledMcp = new Set();
+      let compactions = 0;
+      for (const e of s.events) {
+        if (e.kind === 'compact') { compactions++; continue; }
+        if (!e.id) continue;
+        if (e.kind === 'load' && e.id.startsWith('abil:mcp:')) {
+          const k = e.id.slice(9);
+          loadedMcp.add(k);
+          const m = mcp.get(k) || { server: k, label: e.label, loaded: 0, called: 0, tokens: 0 };
+          m.tokens = Math.max(m.tokens, e.tokens || 0);
+          mcp.set(k, m);
+        }
+        if (e.kind === 'use' && e.id.startsWith('mcp:')) calledMcp.add(e.id.slice(4));
+        if (e.kind === 'load' && STANDING_LOBES.has(e.lobe) && e.tokens) {
+          const x = standing.get(e.id) || { id: e.id, label: e.label, sessions: new Set(), tokens: 0 };
+          x.sessions.add(s.file);
+          x.tokens = Math.max(x.tokens, e.tokens);
+          standing.set(e.id, x);
+        }
+        if (e.kind === 'use' && e.lobe === 'shell') cmd.set(e.id, shellProgramOf(e.input || e.detail));
+        if (e.kind === 'result' && e.lobe === 'shell') {
+          const p = cmd.get(e.id) || '?';
+          const x = shell.get(p) || { program: p, calls: 0, tokens: 0, sessions: new Set() };
+          x.calls++; x.tokens += e.tokens || 0; x.sessions.add(s.file);
+          shell.set(p, x);
+        }
+        if (e.kind === 'result' && e.lobe === 'files' && e.id.startsWith('file:') && (e.tokens || 0) >= 300) {
+          const x = files.get(e.id) || { id: e.id, label: e.label, sessions: new Set(), reads: 0, tokens: 0 };
+          x.sessions.add(s.file); x.reads++; x.tokens += e.tokens;
+          files.set(e.id, x);
+        }
+      }
+      for (const k of loadedMcp) { const m = mcp.get(k); m.loaded++; if (calledMcp.has(k)) m.called++; }
+      rows.push({ file: s.file, title: s.title, mtime: s.mtime, turns: r.turns, context: r.context, reclaim: r.reclaim,
+        compactions, high: r.findings.filter((f) => f.severity === 'high').length });
+    }
+    const n = sessions.length;
+    const findings = [];
+    const push = (type, severity, items, tokens) => { if (items.length) findings.push({ type, severity, tokens, items }); };
+
+    // MCP 서버: 여러 세션에 실렸는데 한 번도 안 부름 → 끌 근거가 확실하다
+    const idleMcp = [...mcp.values()].filter((m) => m.loaded >= 2 && m.called === 0)
+      .map((m) => ({ id: 'abil:mcp:' + m.server, label: m.label, tokens: m.tokens, count: m.loaded }))
+      .sort((a, b) => b.tokens * b.count - a.tokens * a.count);
+    push('p-unused-mcp', idleMcp.length ? 'high' : 'low', idleMcp, idleMcp.reduce((a, i) => a + i.tokens * i.count, 0));
+
+    // 세션마다 다시 읽는 파일 → 요점을 CLAUDE.md 에 적어 두면 읽지 않는다
+    const hot = [...files.values()].filter((f) => f.sessions.size >= Math.max(2, Math.ceil(n * 0.3)))
+      .map((f) => ({ id: f.id, label: f.label, tokens: f.tokens, count: f.sessions.size, reads: f.reads }))
+      .sort((a, b) => b.tokens - a.tokens);
+    push('p-hot-files', 'mid', hot.slice(0, 12), hot.reduce((a, i) => a + i.tokens, 0));
+
+    // 결과가 늘 큰 셸 프로그램 → 조용한 옵션 · 출력 줄이기
+    // cat · sed · head 같은 파일 읽기는 범위를 골라 읽는 것이라 빼고, 빌드 · 테스트 · 로그처럼 출력이 큰 명령만 본다
+    const loud = [...shell.values()].filter((x) => !READ_LIKE.has(x.program) && x.calls >= 3 && x.tokens / x.calls >= 1500)
+      .map((x) => ({ id: 'prog:' + x.program, label: x.program, tokens: x.tokens, count: x.calls, avg: Math.round(x.tokens / x.calls) }))
+      .sort((a, b) => b.tokens - a.tokens);
+    push('p-loud-shell', 'mid', loud, loud.reduce((a, i) => a + i.tokens, 0));
+
+    // 매 세션 실리는 고정 비용
+    const always = [...standing.values()].filter((x) => x.sessions.size >= Math.ceil(n * 0.5))
+      .map((x) => ({ id: x.id, label: x.label, tokens: x.tokens, count: x.sessions.size })).sort((a, b) => b.tokens - a.tokens);
+    const fixed = always.reduce((a, i) => a + i.tokens, 0);
+    push('p-fixed', fixed >= 20000 ? 'mid' : 'low', always.slice(0, 8), fixed);
+
+    findings.sort((a, b) => SEVERITY[a.severity] - SEVERITY[b.severity] || b.tokens - a.tokens);
+    const ctx = rows.map((r) => r.context).filter((v) => v != null).sort((a, b) => a - b);
+    return {
+      sessions: n,
+      turns: rows.reduce((a, r) => a + r.turns, 0),
+      compactions: rows.reduce((a, r) => a + r.compactions, 0),
+      medianContext: ctx.length ? ctx[ctx.length >> 1] : null,
+      fixed,
+      rows,
+      findings,
+    };
+  }
+
+  function describeProject(f, L) {
+    const k = (n) => (n >= 1000 ? (n / 1000).toFixed(1) + 'k' : String(Math.round(n)));
+    const top = f.items[0] ? f.items[0].label : '';
+    switch (f.type) {
+      case 'p-unused-mcp': return {
+        title: L(`여러 세션에 실렸지만 한 번도 안 부른 MCP 서버 ${f.items.length}개`, `${pl(f.items.length, 'MCP server')} loaded in many sessions, never called`),
+        fix: L(`세션마다 안내만 실립니다. 이 프로젝트에서 끄세요 (.mcp.json · /mcp). 예: ${top} (${f.items[0].count}개 세션)`,
+          `Their instructions ride along every session. Disable them for this project (.mcp.json, /mcp). e.g. ${top} (${f.items[0].count} sessions)`) };
+      case 'p-hot-files': return {
+        title: L(`세션마다 다시 읽는 파일 ${f.items.length}개 · 합계 ${k(f.tokens)}`, `${pl(f.items.length, 'file')} re-read in session after session · ${k(f.tokens)} total`),
+        fix: L(`구조 · 규칙 · 자주 찾는 위치를 CLAUDE.md 에 몇 줄로 적어 두면 매번 통째로 읽지 않습니다. 가장 큰 것: ${top}`,
+          `A few lines in CLAUDE.md on structure, rules and where things live save reading them whole each time. Largest: ${top}`) };
+      case 'p-loud-shell': return {
+        title: L(`출력이 늘 큰 명령 ${f.items.length}개 · 합계 ${k(f.tokens)}`, `${pl(f.items.length, 'command')} with consistently large output · ${k(f.tokens)} total`),
+        fix: L(`조용한 옵션(-q, --silent, --reporter=dot)이나 | tail -n 30 을 CLAUDE.md 에 규칙으로 적으세요. 가장 큰 것: ${top}`,
+          `Put quiet flags (-q, --silent, --reporter=dot) or | tail -n 30 in CLAUDE.md as a rule. Largest: ${top}`) };
+      case 'p-fixed': return {
+        title: L(`세션마다 실리는 고정 비용 ${k(f.tokens)}`, `${k(f.tokens)} of fixed context in every session`),
+        fix: L(`첫 입력 전에 이미 차 있는 양입니다. 가장 큰 것부터 줄이세요: ${top}`, `This is spent before your first prompt. Cut from the top: ${top}`) };
+      default: return { title: f.type, fix: '' };
+    }
+  }
+
+  return { squarify, splitSentences, needlesOf, findRefs, wasteCandidates, diagnose, describe, labelEn, projectReport, describeProject, shellProgramOf };
 });

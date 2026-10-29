@@ -8,6 +8,8 @@ const { createState, parseLines, LOBES } = require('./lib/parse');
 const { Tailer } = require('./lib/tail');
 const { listSessions, isAllowed, observedCompactAt, sessionTitle } = require('./lib/sessions');
 const { exportSession } = require('./lib/export');
+const { projectSessions } = require('./lib/project');
+const { projectReport } = require('./public/model.js');
 
 const PORT = Number(process.env.PORT || 7788);
 const HOST = '127.0.0.1';
@@ -58,6 +60,13 @@ const server = http.createServer((req, res) => {
     const file = resolveFile(url.searchParams.get('file'));
     if (!file) return sendJson(res, 404, { error: 'session not found' });
     return stream(req, res, file);
+  }
+  if (url.pathname === '/api/project') {
+    const file = resolveFile(url.searchParams.get('file'));
+    if (!file) return sendJson(res, 404, { error: 'session not found' });
+    const sessions = projectSessions(file, Number(url.searchParams.get('limit')) || 20);
+    const report = projectReport(sessions, { compactAt: getLimits().compactAt });
+    return sendJson(res, 200, { project: path.basename(path.dirname(file)), ...report });
   }
   if (url.pathname === '/api/export') {
     const file = resolveFile(url.searchParams.get('file'));

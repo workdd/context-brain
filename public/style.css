@@ -216,3 +216,18 @@ body.static #lang { margin-left: auto; }
 #ring .reclaim { display: block; color: var(--good); text-decoration: none; margin-top: 2px; }
 #doctor { scroll-margin-top: 60px; }
 .doc .chip { white-space: nowrap; max-width: 100%; overflow: hidden; }
+
+/* 프로젝트 진단 */
+#project-run { margin-left: auto; }
+.psessions { list-style: none; margin: 0 0 12px; padding: 0; display: flex; flex-direction: column; gap: 3px; }
+.psessions li { display: grid; grid-template-columns: 230px 1fr 330px; gap: 10px; align-items: center; font-size: 11px; color: var(--dim);
+  padding: 3px 6px; border-radius: 6px; cursor: pointer; }
+.psessions li:hover { background: rgba(255, 255, 255, 0.04); }
+.psessions li.cur { background: rgba(125, 211, 255, 0.08); color: var(--text); }
+.ps-title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text); }
+.ps-bar { position: relative; height: 8px; background: rgba(255, 255, 255, 0.05); border-radius: 4px; }
+.ps-bar b { position: absolute; inset: 0 auto 0 0; background: #5fa8ff; border-radius: 4px; }
+.ps-bar .cut { position: absolute; top: -3px; bottom: -3px; width: 2px; background: var(--bad); opacity: 0.7; }
+.ps-meta em { color: var(--good); font-style: normal; }
+body.static #project { display: none; }
+@media (max-width: 900px) { .psessions li { grid-template-columns: 1fr; gap: 2px; } }
