@@ -880,7 +880,12 @@ function renderTimeline() {
 
 function renderTurnLabel() {
   const no = vt();
-  $('turn-label').textContent = turns.length ? (viewTurn ? L(`턴 #${no} / ${turns.length}`, `turn #${no} / ${turns.length}`) : L(`지금 턴 #${no}`, `now: turn #${no}`)) : L('턴 없음', 'no turns');
+  // 띠로 되돌아갔거나 재생 중이면 '지금' 이 아니다
+  const past = player.i < allEvents.length;
+  const tag = player.on ? L(' · 재생 중', ' · replaying') : past ? L(' · 되돌아봄', ' · past') : '';
+  const total = past ? Math.max(turns.length, series().turns.length) : turns.length;
+  $('turn-label').textContent = !turns.length ? L('턴 없음', 'no turns')
+    : viewTurn || past ? L(`턴 #${no} / ${total}${tag}`, `turn #${no} / ${total}${tag}`) : L(`지금 턴 #${no}`, `now: turn #${no}`);
   $('turn-prev').disabled = no <= 1;
   $('turn-next').disabled = !viewTurn;
 }
@@ -1075,7 +1080,7 @@ function drawStrip() {
     html += `<circle cx="${X(k)}" cy="${Y(x.ctx)}" r="2.5" fill="#fff"/>`;
     if (!free(x0, x0 + lw)) continue;
     taken.push([x0, x0 + lw]);
-    html += `<text class="spike" x="${anchor === 'end' ? X(k) - 4 : X(k) + 4}" y="${Math.max(10, Y(x.ctx) - 4)}" text-anchor="${anchor}">${escapeHtml(label)}</text>`;
+    html += `<text class="spike" data-k="${k}" x="${anchor === 'end' ? X(k) - 4 : X(k) + 4}" y="${Math.max(10, Y(x.ctx) - 4)}" text-anchor="${anchor}">${escapeHtml(label)}</text>`;
   }
   html += `<rect id="strip-dim" y="0" height="${strip.h}" fill="#03050a" fill-opacity="0.6"/>
     <line id="strip-cursor" y1="0" y2="${strip.h}" stroke="#7dd3ff" stroke-width="2"/>
@@ -1096,6 +1101,9 @@ function drawStripCursor() {
 function stripSample(ev) {
   const s = series().samples;
   if (s.length < 2) return -1;
+  // 이름표 위에서는 글자 위치가 아니라 이름표가 가리키는 호출
+  const tagged = ev.target.closest && ev.target.closest('[data-k]');
+  if (tagged) return Number(tagged.dataset.k);
   const r = $('strip').getBoundingClientRect();
   return Math.max(0, Math.min(s.length - 1, Math.round(((ev.clientX - r.left) / r.width) * (s.length - 1))));
 }
