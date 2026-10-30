@@ -99,17 +99,22 @@ It reads `transcript_path` from the status line input and caches the compaction 
 
 ## Brain regions
 
-| Region | What lands there |
-|---|---|
-| Response | Thinking and answers. Every beam ends here |
-| Rules (CLAUDE.md) | One neuron per loaded CLAUDE.md |
-| Tool list | Skill list, agent list, MCP instructions, deferred tool schemas |
-| Subagents · Web | Agent calls (by type), WebSearch and WebFetch (by host) |
-| Skills · MCP | Skill calls and skill bodies, `mcp__server__tool` calls (by server) |
-| Dialog · Shell | Your prompts and compaction summaries, Bash commands (one neuron per command, named by its description) |
-| Files | Read, Edit, Write, Grep, Glob |
-| Memory (hooks) | Extra context injected by SessionStart and other hooks |
-| System prompt | System prompt, environment, date, model |
+Each region sits where the human brain does a similar job. It is an analogy of roles, not a neuroscience mapping. The region badge shows the brain part under its name, and clicking it shows that part's role.
+
+| Region | Brain part | Its role | What lands there |
+|---|---|---|---|
+| Response | Broca's area (left inferior frontal) | Produces speech | Thinking and answers. Every beam ends here |
+| Dialog | Wernicke's area (left posterior temporal) | Understands language | Your prompts and compaction summaries |
+| Rules (CLAUDE.md) | Prefrontal cortex (front) | Planning, following rules | One neuron per loaded CLAUDE.md |
+| Tool list | Premotor cortex (top front) | Prepares possible movements | Skill list, agent list, MCP instructions, deferred tool schemas |
+| Shell | Motor cortex (top) | Executes movement | Bash commands (one neuron per command, named by its description) |
+| Subagents | Parietal association cortex (top back) | Integrates many inputs | Agent calls (by type) |
+| Files | Occipital lobe, visual cortex (back) | Seeing | Read, Edit, Write, Grep, Glob |
+| Web | Right temporal lobe | Recognizes the outside world | WebSearch and WebFetch (by host) |
+| MCP | Thalamus (deep center) | Relays senses to the cortex | `mcp__server__tool` calls (by server) |
+| Memory (hooks) | Hippocampus (inner temporal) | Stores and recalls memory | Extra context injected by SessionStart and other hooks |
+| Skills | Cerebellum (back, below) | Automates learned movement | Skill calls and skill bodies |
+| System prompt | Brainstem | Always-on basic functions | System prompt, environment, date, model |
 
 ## Commands
 

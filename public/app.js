@@ -15,20 +15,38 @@ const { L, lang } = window.CBLang;
 const AX = 0.95, AY = 0.78, AZ = 1.2; // 대뇌 타원체 반지름
 
 // 영역마다 색과 자리. dir 은 표면 방향, inner 는 뇌 안쪽 고정 위치.
+// 실제 뇌에서 비슷한 역할을 하는 부위에 둔다. +z 앞 · -x 왼쪽 반구 · +y 위
 const LOBE_META = {
-  output:    { color: 0xc9d1e0, dir: [0, 0.15, 1] },
-  rules:     { color: 0xffb347, dir: [0, 0.75, 0.6] },
-  abilities: { color: 0x5fd3ff, dir: [0, 1, -0.15] },
-  agents:    { color: 0xff6fb5, dir: [-0.75, 0.45, 0.45] },
-  web:       { color: 0x4da3ff, dir: [0.75, 0.45, 0.45] },
-  skills:    { color: 0xb6ff5c, dir: [-0.75, 0.5, -0.45] },
-  mcp:       { color: 0x3ee6c8, dir: [0.75, 0.5, -0.45] },
-  dialog:    { color: 0x7dff9b, dir: [-1, -0.35, 0.15] },
-  shell:     { color: 0xf0a24b, dir: [1, -0.35, 0.15] },
-  files:     { color: 0xffe066, dir: [0, 0.2, -1] },
-  memory:    { color: 0xc48bff, inner: [0, -0.22, 0.12], spread: 0.2 },
-  system:    { color: 0x8a9bb0, inner: [0, -0.62, -0.62], spread: 0.17 },
+  output:    { color: 0xc9d1e0, dir: [-0.75, 0.05, 0.75] },                        // 브로카 영역 (왼쪽 전두엽 아래)
+  dialog:    { color: 0x7dff9b, dir: [-1, -0.2, -0.2] },                           // 베르니케 영역 (왼쪽 측두엽 뒤)
+  rules:     { color: 0xffb347, dir: [0, 0.35, 1] },                               // 전전두엽
+  abilities: { color: 0x5fd3ff, dir: [0, 0.9, 0.55] },                             // 전운동 영역
+  shell:     { color: 0xf0a24b, dir: [0, 1, -0.12] },                              // 일차 운동 피질
+  agents:    { color: 0xff6fb5, dir: [0.45, 0.8, -0.65] },                         // 두정엽 연합 영역
+  files:     { color: 0xffe066, dir: [0, 0.15, -1] },                              // 후두엽 (시각 피질)
+  web:       { color: 0x4da3ff, dir: [1, -0.3, 0.4] },                             // 오른쪽 측두엽
+  mcp:       { color: 0x3ee6c8, inner: [0, -0.05, -0.08], box: [0.14, 0.1, 0.14], tag: [0, 0.16, -0.32] }, // 시상
+  memory:    { color: 0xc48bff, inner: [0.34, -0.3, 0.02], box: [0.1, 0.08, 0.2] }, // 해마
+  skills:    { color: 0xb6ff5c, inner: [0, -0.5, -0.82], box: [0.4, 0.17, 0.25] },  // 소뇌
+  system:    { color: 0x8a9bb0, inner: [0, -0.75, -0.45], box: [0.08, 0.18, 0.08], tag: [0, -1.02, -0.5] }, // 뇌간
 };
+// 영역마다 대응한 뇌 부위와 그 역할. 비유이지 신경과학 대응이 아니다
+const LOBE_BRAIN = {
+  output:    ['브로카 영역', "Broca's area", '말을 만들어 내보내는 곳. 답변을 만든다', 'Produces speech. Here: writing the answer'],
+  dialog:    ['베르니케 영역', "Wernicke's area", '들은 말을 이해하는 곳. 사용자 요청이 들어온다', 'Understands language. Here: your prompts'],
+  rules:     ['전전두엽', 'Prefrontal cortex', '계획하고 규칙을 따르는 곳. CLAUDE.md 규칙', 'Planning and following rules. Here: CLAUDE.md'],
+  abilities: ['전운동 영역', 'Premotor cortex', '할 수 있는 동작을 준비하는 곳. 쓸 수 있는 도구 목록', 'Prepares possible movements. Here: the tools on offer'],
+  shell:     ['운동 피질', 'Motor cortex', '동작을 실제로 실행하는 곳. 셸 명령', 'Executes movement. Here: shell commands'],
+  agents:    ['두정엽 연합 영역', 'Parietal association cortex', '여러 정보를 모아 통합하는 곳. 일을 맡기고 결과를 모은다', 'Integrates many inputs. Here: delegating and gathering results'],
+  files:     ['후두엽 (시각)', 'Occipital lobe (vision)', '보는 곳. 파일을 읽는다', 'Seeing. Here: reading files'],
+  web:       ['오른쪽 측두엽', 'Right temporal lobe', '바깥 소리와 사물을 알아보는 곳. 웹 검색과 가져오기', 'Recognizes the outside world. Here: web search and fetch'],
+  mcp:       ['시상', 'Thalamus', '바깥 감각을 대뇌로 중계하는 곳. 외부 MCP 서버', 'Relays senses to the cortex. Here: external MCP servers'],
+  memory:    ['해마', 'Hippocampus', '기억을 저장하고 꺼내는 곳. 훅이 넣어 주는 기억', 'Stores and recalls memory. Here: memory injected by hooks'],
+  skills:    ['소뇌', 'Cerebellum', '몸에 익은 동작을 자동으로 하는 곳. 익혀 둔 스킬', 'Automates learned movement. Here: skills'],
+  system:    ['뇌간', 'Brainstem', '숨쉬기처럼 늘 켜진 기본 기능. 시스템 프롬프트', 'Always-on basic functions. Here: the system prompt'],
+};
+const brainPart = (l) => (LOBE_BRAIN[l] ? L(LOBE_BRAIN[l][0], LOBE_BRAIN[l][1]) : '');
+const brainRole = (l) => (LOBE_BRAIN[l] ? L(LOBE_BRAIN[l][2], LOBE_BRAIN[l][3]) : '');
 const lobeNames = Object.keys(LOBE_META);
 // 압축되면 컨텍스트에서 빠지는 영역 (규칙·시스템·도구 목록은 다시 실린다)
 const COMPACTABLE = new Set(['dialog', 'files', 'shell', 'web', 'agents', 'mcp', 'output']);
@@ -270,7 +288,8 @@ const brain = (() => {
     el.style.color = hex(LOBE_META[l].color);
     el.addEventListener('click', () => focusLobe(l));
     const obj = new CSS2DObject(el);
-    obj.position.copy(LOBE_META[l].inner ? anchors[l] : anchors[l].clone().multiplyScalar(1.2));
+    // 깊은 부위끼리 이름표가 겹치지 않게 tag 로 자리를 따로 준다
+    obj.position.copy(LOBE_META[l].tag ? new THREE.Vector3(...LOBE_META[l].tag) : LOBE_META[l].inner ? anchors[l] : anchors[l].clone().multiplyScalar(1.2));
     scene.add(obj);
     lobeState[l] = { act: 0, hold: 0, present: false, el, color: new THREE.Color(LOBE_META[l].color) };
   }
@@ -287,7 +306,7 @@ const brain = (() => {
     const u = r() * 2 - 1, th = r() * Math.PI * 2, rr = Math.cbrt(r());
     const s = Math.sqrt(1 - u * u);
     const off = new THREE.Vector3(s * Math.cos(th), u, s * Math.sin(th));
-    if (m.inner) return new THREE.Vector3(...m.inner).addScaledVector(off, (m.spread || 0.2) * rr);
+    if (m.inner) return new THREE.Vector3(...m.inner).add(off.multiplyScalar(rr).multiply(new THREE.Vector3(...m.box)));
     const d = new THREE.Vector3(...m.dir).normalize().addScaledVector(off, 0.38 * rr);
     return surface([d.x, d.y, d.z], 0.86 + r() * 0.08);
   }
@@ -427,7 +446,7 @@ const brain = (() => {
       const present = !!sums[l];
       if (present !== s.present) { s.present = present; surfaceDirty = true; }
       const hidden = (byLobe[l] || []).filter((n) => !visible.has(n.id)).length;
-      s.el.innerHTML = `${lobeName(l)}<em>${sums[l] ? kfmt(sums[l]) : '-'}</em>${hidden ? `<small>${L(`+${hidden}개`, `+${hidden}`)}</small>` : ''}`;
+      s.el.innerHTML = `${lobeName(l)}<em>${sums[l] ? kfmt(sums[l]) : '-'}</em>${hidden ? `<small>${L(`+${hidden}개`, `+${hidden}`)}</small>` : ''}<span class="anat">${brainPart(l)}</span>`;
       s.el.title = hidden ? L(`작은 항목 ${hidden}개는 뉴런 없이 합계에만 들어 있습니다. 누르면 목록`, `${hidden} small items are counted in the total without a neuron. Click for the list`) : '';
       s.el.style.opacity = present ? '1' : '0.35';
     }
@@ -903,6 +922,7 @@ function renderDetail() {
     box.innerHTML = `<button class="close" aria-label="닫기">×</button>
       <div class="d-lobe" style="color:${hex(LOBE_META[l].color)}">${L('영역', 'Region')}</div>
       <h3>${lobeName(l)}</h3>
+      <div class="d-anat"><b>${brainPart(l)}</b> · ${brainRole(l)}</div>
       <div class="d-stats">${L(`${list.length}개 · 컨텍스트에 남은 양 약 ${fmt(total)} 토큰`, `${list.length} items · ~${fmt(total)} tokens still in context`)}</div>
       <ol class="l-items">${list.map((n) => `<li data-id="${escapeHtml(n.id)}" class="${n.compacted ? 'off' : ''} ${wasteIds.has(n.id) ? 'waste' : ''}">
         <span>${escapeHtml(n.label)}</span><em>${n.compacted ? L('압축됨', 'compacted') : kfmt(n.tokens)}${n.lastTurn ? ` · #${n.lastTurn}` : ''}</em></li>`).join('') || `<li>${L('항목 없음', 'no items')}</li>`}</ol>`;
